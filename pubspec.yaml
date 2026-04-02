@@ -1,0 +1,43 @@
+name: boat_racing
+description: "경정 Plus - 경정 경주 정보, 출주표, 배당률, AI 예측을 제공하는 앱"
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.9.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+  flutter_riverpod: ^2.6.1
+  go_router: ^14.6.2
+  dio: ^5.7.0
+  fl_chart: ^0.69.0
+  google_fonts: ^6.2.1
+  share_plus: ^10.0.0
+  table_calendar: ^3.1.2
+  shared_preferences: ^2.5.4
+  supabase_flutter: ^2.12.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+  flutter_launcher_icons: ^0.14.4
+
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "assets/images/app_logo.png"
+  adaptive_icon_background: "#0D1117"
+  adaptive_icon_foreground: "assets/images/app_logo.png"
+  min_sdk_android: 21
+  remove_alpha_ios: true
+
+flutter:
+  uses-material-design: true
+
+  assets:
+    - assets/images/
