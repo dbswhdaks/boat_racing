@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/services/boat_racing_api_service.dart';
+import '../../../core/services/kboat_scraper_service.dart';
 import '../../../core/services/prediction_engine.dart';
 import '../../../core/services/supabase_backup_service.dart';
 import '../../../models/race.dart';
@@ -16,6 +17,10 @@ final boatRacingApiProvider = Provider<BoatRacingApiService>((ref) {
 
 final supabaseBackupProvider = Provider<SupabaseBackupService>((ref) {
   return SupabaseBackupService();
+});
+
+final kboatScraperProvider = Provider<KboatScraperService>((ref) {
+  return KboatScraperService();
 });
 
 final selectedRacerEntryProvider = StateProvider<RaceEntry?>((ref) => null);
@@ -49,13 +54,32 @@ final apiStatusProvider = FutureProvider<ApiResult<String>>((ref) async {
 final monthRaceDatesProvider = FutureProvider.family<
     Set<String>,
     ({int year, int month})>((ref, params) async {
+  final link = ref.keepAlive();
   final api = ref.watch(boatRacingApiProvider);
   final backup = ref.watch(supabaseBackupProvider);
+  final kboat = ref.watch(kboatScraperProvider);
+
+  final dates = <String>{};
 
   final result = await api.fetchRaceDatesForMonth(year: params.year, month: params.month);
   if (result.isSuccess && result.data != null && result.data!.isNotEmpty) {
-    return result.data!;
+    dates.addAll(result.data!);
   }
+
+  try {
+    final kboatDates = await kboat.fetchRaceDatesForMonth(
+      year: params.year,
+      month: params.month,
+    );
+    if (kboatDates.isNotEmpty) {
+      dates.addAll(kboatDates);
+      if (kDebugMode) debugPrint('[Provider] monthRaceDates: KBOAT ${kboatDates.length}일 병합');
+    }
+  } catch (e) {
+    if (kDebugMode) debugPrint('[Provider] monthRaceDates KBOAT 실패: $e');
+  }
+
+  if (dates.isNotEmpty) return dates;
 
   final cached = await backup.loadRaceDatesForMonth(
     year: params.year,
@@ -66,6 +90,7 @@ final monthRaceDatesProvider = FutureProvider.family<
     return cached;
   }
 
+  link.close();
   return {};
 });
 
@@ -73,14 +98,17 @@ final monthRaceDatesProvider = FutureProvider.family<
 final raceListProvider =
     FutureProvider.family<DataWithSource<List<Race>>, ({String date})>(
         (ref, params) async {
+  final link = ref.keepAlive();
   final api = ref.watch(boatRacingApiProvider);
   final backup = ref.watch(supabaseBackupProvider);
+  final kboat = ref.watch(kboatScraperProvider);
 
   final result = await api.fetchRaceList(date: params.date);
 
   if (result.isSuccess && result.data != null && result.data!.isNotEmpty) {
     if (kDebugMode) debugPrint('[Provider] raceList(${params.date}): API ${result.data!.length}건');
     backup.saveRaces(result.data!);
+    api.preWarmPayoffCache(year: int.parse(params.date.substring(0, 4)));
     return DataWithSource(data: result.data!, fromApi: true);
   }
 
@@ -90,7 +118,19 @@ final raceListProvider =
     return DataWithSource(data: cached, fromApi: false, apiError: result.errorMessage);
   }
 
-  if (kDebugMode) debugPrint('[Provider] raceList(${params.date}): 데이터 없음 (${result.errorMessage})');
+  try {
+    final kboatRaces = await kboat.fetchRaceList(date: params.date);
+    if (kboatRaces.isNotEmpty) {
+      if (kDebugMode) debugPrint('[Provider] raceList(${params.date}): KBOAT ${kboatRaces.length}건');
+      backup.saveRaces(kboatRaces);
+      return DataWithSource(data: kboatRaces, fromApi: false, apiError: 'KBOAT 영상 기반');
+    }
+  } catch (e) {
+    if (kDebugMode) debugPrint('[Provider] raceList KBOAT 실패: $e');
+  }
+
+  link.close();
+  if (kDebugMode) debugPrint('[Provider] raceList(${params.date}): 데이터 없음 → keepAlive 해제');
   return DataWithSource(
     data: [],
     fromApi: true,
@@ -101,6 +141,7 @@ final raceListProvider =
 /// 출주표
 final raceEntriesProvider = FutureProvider.family<DataWithSource<List<RaceEntry>>,
     ({String date, int raceNo})>((ref, params) async {
+  ref.keepAlive();
   final api = ref.watch(boatRacingApiProvider);
   final backup = ref.watch(supabaseBackupProvider);
 
@@ -127,6 +168,7 @@ final raceEntriesProvider = FutureProvider.family<DataWithSource<List<RaceEntry>
 /// 배당률
 final oddsProvider = FutureProvider.family<Odds, ({String date, int raceNo})>(
     (ref, params) async {
+  ref.keepAlive();
   final api = ref.watch(boatRacingApiProvider);
   final result = await api.fetchPayoff(date: params.date, rcNo: params.raceNo);
   if (result.isSuccess && result.data != null) return result.data!;

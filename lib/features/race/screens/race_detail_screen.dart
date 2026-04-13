@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:url_launcher/url_launcher.dart';
+import '../../../core/constants/api_constants.dart';
 import '../../../models/race_entry.dart';
 import '../../../models/odds.dart';
 import '../providers/race_providers.dart';
@@ -79,16 +81,14 @@ class _RaceDetailScreenState extends ConsumerState<RaceDetailScreen>
     final entriesAsync = ref.watch(raceEntriesProvider(params));
     final oddsAsync = ref.watch(oddsProvider(params));
 
+    final odds = oddsAsync.valueOrNull ?? const Odds();
+
     return Scaffold(
       backgroundColor: _bg,
       body: entriesAsync.when(
         data: (entriesWithSource) {
           final entries = entriesWithSource.data;
-          return oddsAsync.when(
-            data: (odds) => _buildBody(context, entries, odds, entriesWithSource.apiError),
-            loading: () => const Center(child: CircularProgressIndicator(color: _primary)),
-            error: (e, _) => Center(child: Text('배당: $e', style: const TextStyle(color: Colors.white70))),
-          );
+          return _buildBody(context, entries, odds, entriesWithSource.apiError);
         },
         loading: () => const Center(child: CircularProgressIndicator(color: _primary)),
         error: (e, _) => Center(child: Text('출주표: $e', style: const TextStyle(color: Colors.white70))),
@@ -186,6 +186,12 @@ class _RaceDetailScreenState extends ConsumerState<RaceDetailScreen>
             child: Padding(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
               child: _InfoCard(raceNo: widget.raceNo),
+            ),
+          ),
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+              child: _VideoButtons(date: widget.date, raceNo: widget.raceNo),
             ),
           ),
           SliverPersistentHeader(
@@ -355,19 +361,27 @@ class _ComprehensiveTab extends StatelessWidget {
         ),
         const SizedBox(height: 8),
         ...entries.map(
-          (e) => EntryCard(
-            entry: e,
-            popularityRank: popRankByCourse[e.courseNo],
-            comprehensiveRank: compRankByCourse[e.courseNo],
+          (e) => Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: EntryCard(
+              entry: e,
+              popularityRank: popRankByCourse[e.courseNo],
+              comprehensiveRank: compRankByCourse[e.courseNo],
+            ),
           ),
         ),
         const SizedBox(height: 16),
         OddsPanel(odds: odds),
         const SizedBox(height: 12),
-        Text(
-          '※ 배당·기록은 참고용이며, 실제 투표 및 결과와 다를 수 있습니다.',
-          style: TextStyle(color: Colors.grey.shade600, fontSize: 11, height: 1.4),
+        SizedBox(
+          width: double.infinity,
+          child: Text(
+            '※ 배당·기록은 참고용이며, 실제 투표 및 결과와 다를 수 있습니다.',
+            textAlign: TextAlign.justify,
+            style: TextStyle(color: Colors.grey.shade600, fontSize: 11, height: 1.4),
+          ),
         ),
+        const SizedBox(height: 40),
       ],
     );
   }
@@ -502,4 +516,106 @@ Color _courseColor(int courseNo) {
   return (courseNo >= 1 && courseNo <= 6) ? colors[courseNo - 1] : const Color(0xFF6B7280);
 }
 
+class _VideoButtons extends StatelessWidget {
+  const _VideoButtons({required this.date, required this.raceNo});
 
+  final String date;
+  final int raceNo;
+
+  Future<void> _launchVideo(BuildContext context, String url, String label) async {
+    try {
+      final uri = Uri.parse(url);
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } catch (_) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('$label 영상을 열 수 없습니다.'),
+            backgroundColor: const Color(0xFF30363D),
+          ),
+        );
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Expanded(
+          child: _VideoBtn(
+            icon: Icons.videocam_outlined,
+            label: '소개항주',
+            color: const Color(0xFF64B5F6),
+            onTap: () => _launchVideo(
+              context,
+              ApiConstants.introVideoUrl(date, raceNo),
+              '소개항주',
+            ),
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: _VideoBtn(
+            icon: Icons.play_circle_outline,
+            label: '경주영상',
+            color: const Color(0xFFEF5350),
+            onTap: () => _launchVideo(
+              context,
+              ApiConstants.raceVideoUrl(date, raceNo),
+              '경주',
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _VideoBtn extends StatelessWidget {
+  const _VideoBtn({
+    required this.icon,
+    required this.label,
+    required this.color,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final Color color;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: _card,
+      borderRadius: BorderRadius.circular(12),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: color.withValues(alpha: 0.3)),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(icon, color: color, size: 22),
+              const SizedBox(width: 8),
+              Text(
+                label,
+                style: TextStyle(
+                  color: color,
+                  fontWeight: FontWeight.w600,
+                  fontSize: 14,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}

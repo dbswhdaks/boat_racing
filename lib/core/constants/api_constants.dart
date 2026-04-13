@@ -117,4 +117,26 @@ class ApiConstants {
   };
 
   static String venueName(int code) => venueCodes[code] ?? '미사리경정공원';
+
+  // ─── KBOAT 경주동영상 (cast.kcycle.or.kr VOD) ───
+
+  static const String _vodBase = 'https://cast.kcycle.or.kr/vod/mbr';
+
+  /// 경주장면 동영상 URL
+  static String raceVideoUrl(String dateYmd, int raceNo) {
+    final y = dateYmd.substring(0, 4);
+    final m = dateYmd.substring(4, 6);
+    final d = dateYmd.substring(6, 8);
+    final rn = raceNo.toString().padLeft(2, '0');
+    return '$_vodBase/$y/$m/$d/$dateYmd$rn.mp4';
+  }
+
+  /// 소개항주 동영상 URL
+  static String introVideoUrl(String dateYmd, int raceNo) {
+    final y = dateYmd.substring(0, 4);
+    final m = dateYmd.substring(4, 6);
+    final d = dateYmd.substring(6, 8);
+    final rn = raceNo.toString().padLeft(2, '0');
+    return '$_vodBase/$y/$m/$d/${dateYmd}${rn}i.mp4';
+  }
 }

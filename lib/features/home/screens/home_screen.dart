@@ -29,6 +29,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     with WidgetsBindingObserver {
   Timer? _autoRefreshTimer;
   Timer? _displayTimer;
+  bool _hasData = true;
 
   @override
   void initState() {
@@ -55,7 +56,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   void _startTimers() {
     _autoRefreshTimer?.cancel();
     _displayTimer?.cancel();
-    _autoRefreshTimer = Timer.periodic(const Duration(seconds: 60), (_) {
+    final interval = _hasData ? 60 : 30;
+    _autoRefreshTimer = Timer.periodic(Duration(seconds: interval), (_) {
       if (!mounted) return;
       if (ref.read(_autoRefreshEnabledProvider)) {
         _refreshNow();
@@ -66,9 +68,17 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     });
   }
 
+  void _onDataChanged(bool hasData) {
+    if (hasData != _hasData) {
+      _hasData = hasData;
+      _startTimers();
+    }
+  }
+
   void _refreshNow() {
     final selected = ref.read(selectedDateProvider);
     ref.read(boatRacingApiProvider).invalidateCache(year: selected.year);
+    ref.read(kboatScraperProvider).invalidateCache();
     final ymd = dateToYmd(selected);
     ref.read(supabaseBackupProvider).clearCacheForDate(ymd);
     ref.invalidate(raceListProvider((date: ymd)));
@@ -121,8 +131,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     ref.listen<AsyncValue<DataWithSource<List<Race>>>>(
       raceListProvider((date: ymd)),
       (prev, next) {
-        next.whenData((_) {
+        next.whenData((wrapped) {
           ref.read(_lastRefreshProvider.notifier).state = DateTime.now();
+          _onDataChanged(wrapped.data.isNotEmpty);
         });
       },
     );
@@ -195,7 +206,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
               data: (wrapped) {
                 final races = wrapped.data;
                 if (races.isEmpty) {
-                  return _HomeEmpty(onRefresh: _refreshNow);
+                  return _HomeEmpty(
+                    onRefresh: _refreshNow,
+                    autoRefreshEnabled: autoOn,
+                  );
                 }
                 return ListView.builder(
                   padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
@@ -375,9 +389,10 @@ class _UpdateMetaRow extends StatelessWidget {
 }
 
 class _HomeEmpty extends StatelessWidget {
-  const _HomeEmpty({required this.onRefresh});
+  const _HomeEmpty({required this.onRefresh, this.autoRefreshEnabled = true});
 
   final VoidCallback onRefresh;
+  final bool autoRefreshEnabled;
 
   @override
   Widget build(BuildContext context) {
@@ -395,6 +410,30 @@ class _HomeEmpty extends StatelessWidget {
               textAlign: TextAlign.center,
               style: TextStyle(color: Colors.white70, fontSize: 16),
             ),
+            if (autoRefreshEnabled) ...[
+              const SizedBox(height: 10),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  SizedBox(
+                    width: 12,
+                    height: 12,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 1.5,
+                      color: _kGold.withValues(alpha: 0.7),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    '30초마다 새 데이터 자동 확인 중',
+                    style: TextStyle(
+                      color: _kGold.withValues(alpha: 0.7),
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ),
+            ],
             const SizedBox(height: 20),
             FilledButton.icon(
               onPressed: onRefresh,

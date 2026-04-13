@@ -131,7 +131,7 @@ class _MonthCalendarSheetState extends ConsumerState<MonthCalendarSheet> {
                     borderRadius: BorderRadius.circular(8),
                   ),
                   todayDecoration: BoxDecoration(
-                    border: Border.all(color: _kGold, width: 1.5),
+                    border: Border.all(color: Colors.orange, width: 1.5),
                     borderRadius: BorderRadius.circular(8),
                   ),
                   selectedTextStyle: const TextStyle(
@@ -146,7 +146,7 @@ class _MonthCalendarSheetState extends ConsumerState<MonthCalendarSheet> {
                     color: Colors.white.withValues(alpha: 0.25),
                   ),
                   todayTextStyle: const TextStyle(
-                    color: _kGold,
+                    color: Colors.orange,
                     fontWeight: FontWeight.w700,
                   ),
                   markersMaxCount: 1,

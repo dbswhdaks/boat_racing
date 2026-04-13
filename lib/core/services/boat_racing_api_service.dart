@@ -115,34 +115,49 @@ class BoatRacingApiService {
 
   Future<List<Map<String, dynamic>>> _fetchPages(
     String url,
-    Map<String, dynamic> extraParams,
-  ) async {
+    Map<String, dynamic> extraParams, {
+    int rowsPerPage = 1000,
+  }) async {
+    final firstParams = {..._baseParams(pageNo: 1, numOfRows: rowsPerPage), ...extraParams};
+    final firstRes = await _dio.get(url, queryParameters: firstParams);
+    final firstError = _checkApiError(firstRes.data);
+    if (firstError != null) return [];
+
+    final totalCount = _extractTotalCount(firstRes.data);
+    final firstExtracted = _extractItems(firstRes.data);
+    if (firstExtracted.isEmpty) return [];
+
     final items = <Map<String, dynamic>>[];
-    int page = 1;
-    int totalCount = 0;
+    for (final item in firstExtracted) {
+      if (item is Map) items.add(Map<String, dynamic>.from(item));
+    }
 
-    while (true) {
-      final params = {..._baseParams(pageNo: page), ...extraParams};
-      final res = await _dio.get(url, queryParameters: params);
+    if (items.length >= totalCount) return items;
+
+    final totalPages = (totalCount / rowsPerPage).ceil().clamp(1, 30);
+    if (totalPages <= 1) return items;
+
+    final futures = <Future<Response>>[];
+    for (int page = 2; page <= totalPages; page++) {
+      final params = {..._baseParams(pageNo: page, numOfRows: rowsPerPage), ...extraParams};
+      futures.add(_dio.get(url, queryParameters: params));
+    }
+
+    final responses = await Future.wait(futures, eagerError: false);
+    for (final res in responses) {
       final error = _checkApiError(res.data);
-      if (error != null) break;
-
-      if (page == 1) totalCount = _extractTotalCount(res.data);
-
+      if (error != null) continue;
       final extracted = _extractItems(res.data);
-      if (extracted.isEmpty) break;
-
       for (final item in extracted) {
         if (item is Map) items.add(Map<String, dynamic>.from(item));
       }
-
-      if (items.length >= totalCount || page >= 30) break;
-      page++;
     }
+
     return items;
   }
 
   void invalidateCache({int? year}) {
+    _payoffPreWarmFuture = null;
     if (year != null) {
       _raceInfoCache.remove('$year');
       _raceDocCache.remove('$year');
@@ -272,6 +287,18 @@ class BoatRacingApiService {
   // ─── 배당률 (연간 전체 → race_ymd + race_no 필터) ───
 
   final Map<String, List<Map<String, dynamic>>> _payoffCache = {};
+  Future<void>? _payoffPreWarmFuture;
+
+  void preWarmPayoffCache({required int year}) {
+    final key = '$year';
+    if (_payoffCache.containsKey(key)) return;
+    _payoffPreWarmFuture ??= _fetchPages(ApiConstants.payoff, {'stnd_yr': key}).then((items) {
+      _payoffCache[key] = items;
+      _payoffPreWarmFuture = null;
+    }).catchError((_) {
+      _payoffPreWarmFuture = null;
+    });
+  }
 
   Future<ApiResult<Odds>> fetchPayoff({
     required String date,
@@ -280,8 +307,13 @@ class BoatRacingApiService {
     try {
       final year = date.substring(0, 4);
       if (!_payoffCache.containsKey(year)) {
-        final items = await _fetchPages(ApiConstants.payoff, {'stnd_yr': year});
-        _payoffCache[year] = items;
+        if (_payoffPreWarmFuture != null) {
+          await _payoffPreWarmFuture;
+        }
+        if (!_payoffCache.containsKey(year)) {
+          final items = await _fetchPages(ApiConstants.payoff, {'stnd_yr': year});
+          _payoffCache[year] = items;
+        }
       }
       final allItems = _payoffCache[year]!;
 

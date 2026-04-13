@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:url_launcher/url_launcher.dart';
+import '../../../core/constants/api_constants.dart';
 import '../../../models/prediction.dart';
 import '../../../models/race_entry.dart';
 import '../../../models/race_result.dart';
@@ -193,7 +195,9 @@ class _RaceResultScreenState extends ConsumerState<RaceResultScreen> {
                       status: raceStatus,
                       isToday: _isToday(widget.date),
                     ),
-                    const SizedBox(height: 24),
+                    const SizedBox(height: 12),
+                    _VideoRow(date: widget.date, raceNo: widget.raceNo),
+                    const SizedBox(height: 20),
                     if (preRace)
                       _PreRaceCard(onRetry: _refresh)
                     else ...[
@@ -1180,6 +1184,110 @@ class _DisclaimerFooter extends StatelessWidget {
           color: Colors.grey.shade600,
           fontSize: 11,
           height: 1.45,
+        ),
+      ),
+    );
+  }
+}
+
+class _VideoRow extends StatelessWidget {
+  const _VideoRow({required this.date, required this.raceNo});
+
+  final String date;
+  final int raceNo;
+
+  Future<void> _launch(BuildContext context, String url, String label) async {
+    try {
+      final uri = Uri.parse(url);
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } catch (_) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('$label 영상을 열 수 없습니다.'),
+            backgroundColor: const Color(0xFF30363D),
+          ),
+        );
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Expanded(
+          child: _VideoChip(
+            icon: Icons.videocam_outlined,
+            label: '소개항주',
+            color: const Color(0xFF64B5F6),
+            onTap: () => _launch(
+              context,
+              ApiConstants.introVideoUrl(date, raceNo),
+              '소개항주',
+            ),
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: _VideoChip(
+            icon: Icons.play_circle_outline,
+            label: '경주영상',
+            color: const Color(0xFFEF5350),
+            onTap: () => _launch(
+              context,
+              ApiConstants.raceVideoUrl(date, raceNo),
+              '경주',
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _VideoChip extends StatelessWidget {
+  const _VideoChip({
+    required this.icon,
+    required this.label,
+    required this.color,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final Color color;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: _card,
+      borderRadius: BorderRadius.circular(12),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: color.withValues(alpha: 0.3)),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(icon, color: color, size: 22),
+              const SizedBox(width: 8),
+              Text(
+                label,
+                style: TextStyle(
+                  color: color,
+                  fontWeight: FontWeight.w600,
+                  fontSize: 14,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
