@@ -6,7 +6,7 @@ class ApiConstants {
 
   static const String _defaultServiceKey = String.fromEnvironment(
     'API_SERVICE_KEY',
-    defaultValue: '',
+    defaultValue: '788d1f62af9d665d2f002057f9526ac8f2776910fef87b0e95d27e232fe0967f',
   );
 
   static String _runtimeServiceKey = '';

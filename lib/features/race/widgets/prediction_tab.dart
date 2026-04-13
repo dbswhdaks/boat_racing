@@ -89,8 +89,10 @@ class _PredictionLoadedBody extends StatelessWidget {
         ? 1.0
         : sorted.map((e) => e.totalScore).reduce((a, b) => a > b ? a : b);
 
+    final bottomPadding = MediaQuery.paddingOf(context).bottom;
+
     return SingleChildScrollView(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 28),
+      padding: EdgeInsets.fromLTRB(16, 12, 16, 32 + bottomPadding),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [

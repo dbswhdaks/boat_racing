@@ -139,9 +139,12 @@ class _RaceResultScreenState extends ConsumerState<RaceResultScreen> {
       }
     });
 
+    final bottomPadding = MediaQuery.paddingOf(context).bottom;
+
     return Scaffold(
       backgroundColor: _bg,
       body: SafeArea(
+        bottom: false,
         child: Column(
           children: [
             Padding(
@@ -186,7 +189,7 @@ class _RaceResultScreenState extends ConsumerState<RaceResultScreen> {
             const SizedBox(height: 16),
             Expanded(
               child: SingleChildScrollView(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
+                padding: EdgeInsets.fromLTRB(16, 0, 16, 32 + bottomPadding),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -239,7 +242,6 @@ class _RaceResultScreenState extends ConsumerState<RaceResultScreen> {
                     ],
                     const SizedBox(height: 16),
                     const _DisclaimerFooter(),
-                    const SizedBox(height: 32),
                   ],
                 ),
               ),
