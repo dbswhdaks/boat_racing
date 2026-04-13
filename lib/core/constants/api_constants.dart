@@ -4,8 +4,10 @@ import 'package:shared_preferences/shared_preferences.dart';
 class ApiConstants {
   static const String baseUrl = 'https://apis.data.go.kr/B551014';
 
-  static const String _defaultServiceKey =
-      '788d1f62af9d665d2f002057f9526ac8f2776910fef87b0e95d27e232fe0967f';
+  static const String _defaultServiceKey = String.fromEnvironment(
+    'API_SERVICE_KEY',
+    defaultValue: '',
+  );
 
   static String _runtimeServiceKey = '';
 

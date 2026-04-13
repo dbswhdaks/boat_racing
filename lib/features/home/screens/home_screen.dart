@@ -341,29 +341,14 @@ class _UpdateMetaRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final sourceLabel = asyncRaces.maybeWhen(
-      data: (w) => w.fromApi ? 'API' : '목업',
-      orElse: () => '—',
-    );
-
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
       child: Row(
         children: [
           Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  '갱신: ${formatTime(lastRefresh)}',
-                  style: const TextStyle(color: Colors.white70, fontSize: 12),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  '출처: $sourceLabel',
-                  style: const TextStyle(color: Colors.white54, fontSize: 11),
-                ),
-              ],
+            child: Text(
+              '갱신: ${formatTime(lastRefresh)}',
+              style: const TextStyle(color: Colors.white70, fontSize: 12),
             ),
           ),
           Row(
