@@ -220,6 +220,42 @@ class _RacerDetailBody extends StatelessWidget {
               ),
             ),
           ],
+          if (detail.tmsRecords.length >= 2) ...[
+            SliverPadding(
+              padding: const EdgeInsets.fromLTRB(16, 20, 16, 8),
+              sliver: SliverToBoxAdapter(child: _SectionTitle('회차별 컨디션 추이')),
+            ),
+            SliverPadding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              sliver: SliverToBoxAdapter(
+                child: _TmsConditionCard(detail: detail),
+              ),
+            ),
+          ],
+          if (detail.normalStartCount != null) ...[
+            SliverPadding(
+              padding: const EdgeInsets.fromLTRB(16, 20, 16, 8),
+              sliver: SliverToBoxAdapter(child: _SectionTitle('출발 정보')),
+            ),
+            SliverPadding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              sliver: SliverToBoxAdapter(
+                child: _StartInfoCard(detail: detail),
+              ),
+            ),
+          ],
+          if (detail.courseStrategies.isNotEmpty) ...[
+            SliverPadding(
+              padding: const EdgeInsets.fromLTRB(16, 20, 16, 8),
+              sliver: SliverToBoxAdapter(child: _SectionTitle('코스별 우승전법')),
+            ),
+            SliverPadding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              sliver: SliverToBoxAdapter(
+                child: _CourseStrategyCard(detail: detail),
+              ),
+            ),
+          ],
           if (detail.courseWins.values.any((v) => v > 0)) ...[
             SliverPadding(
               padding: const EdgeInsets.fromLTRB(16, 20, 16, 8),
@@ -244,7 +280,11 @@ class _RacerDetailBody extends StatelessWidget {
               ),
             ),
           ],
-          const SliverToBoxAdapter(child: SizedBox(height: 32)),
+          SliverToBoxAdapter(
+            child: SizedBox(
+              height: 32 + MediaQuery.of(context).padding.bottom,
+            ),
+          ),
         ],
       ),
     );
@@ -493,6 +533,8 @@ class _BasicInfoCard extends StatelessWidget {
                 ? '-'
                 : detail.grade,
           ),
+          if (detail.racerPeriodNo != null)
+            _InfoRow(label: '기수', value: '${detail.racerPeriodNo}기'),
           if (detail.age != null) _InfoRow(label: '나이', value: '${detail.age}세'),
           if (detail.weight != null)
             _InfoRow(
@@ -503,6 +545,16 @@ class _BasicInfoCard extends StatelessWidget {
             _InfoRow(
               label: '평균순위',
               value: detail.yearAvgRank!.toStringAsFixed(1),
+            ),
+          if (detail.winRatio != null)
+            _InfoRow(
+              label: '승률',
+              value: '${detail.winRatio!.toStringAsFixed(1)}%',
+            ),
+          if (detail.podiumRatio != null)
+            _InfoRow(
+              label: '입상률',
+              value: '${detail.podiumRatio!.toStringAsFixed(1)}%',
             ),
         ],
       ),
@@ -882,6 +934,512 @@ class _RecentConditionCard extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+// ─── TMS Condition Card (회차별 컨디션 추이) ────────────────────────────────────
+
+class _TmsConditionCard extends StatelessWidget {
+  final RacerDetail detail;
+
+  const _TmsConditionCard({required this.detail});
+
+  @override
+  Widget build(BuildContext context) {
+    final records = detail.tmsRecords;
+    if (records.length < 2) return const SizedBox.shrink();
+
+    final latest = records.last;
+    final prev = records[records.length - 2];
+    final scoreDiff = latest.avgScore - prev.avgScore;
+    final winDiff = latest.winRate - prev.winRate;
+
+    String condition;
+    Color condColor;
+    IconData condIcon;
+    if (scoreDiff > 0.5 || winDiff > 5) {
+      condition = '상승세';
+      condColor = const Color(0xFF22C55E);
+      condIcon = Icons.trending_up;
+    } else if (scoreDiff < -0.5 || winDiff < -5) {
+      condition = '하락세';
+      condColor = const Color(0xFFEF4444);
+      condIcon = Icons.trending_down;
+    } else {
+      condition = '유지';
+      condColor = const Color(0xFFFBBF24);
+      condIcon = Icons.trending_flat;
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: _kCard,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: _kBorder),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(condIcon, color: condColor, size: 22),
+              const SizedBox(width: 8),
+              Text(
+                '현재 컨디션: $condition',
+                style: GoogleFonts.notoSansKr(
+                  fontWeight: FontWeight.w700,
+                  color: condColor,
+                  fontSize: 15,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          SizedBox(
+            height: 160,
+            child: LineChart(
+              LineChartData(
+                gridData: FlGridData(
+                  show: true,
+                  drawVerticalLine: false,
+                  horizontalInterval: 2,
+                  getDrawingHorizontalLine: (v) => FlLine(
+                    color: Colors.white.withValues(alpha: 0.06),
+                    strokeWidth: 1,
+                  ),
+                ),
+                titlesData: FlTitlesData(
+                  bottomTitles: AxisTitles(
+                    sideTitles: SideTitles(
+                      showTitles: true,
+                      getTitlesWidget: (v, _) {
+                        final i = v.toInt();
+                        if (i < 0 || i >= records.length) {
+                          return const SizedBox.shrink();
+                        }
+                        return Padding(
+                          padding: const EdgeInsets.only(top: 6),
+                          child: Text(
+                            '${records[i].weekTcnt}회',
+                            style: TextStyle(
+                              color: Colors.white.withValues(alpha: 0.5),
+                              fontSize: 10,
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                  leftTitles: AxisTitles(
+                    sideTitles: SideTitles(
+                      showTitles: true,
+                      reservedSize: 28,
+                      getTitlesWidget: (v, _) => Text(
+                        v.toInt().toString(),
+                        style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.4),
+                          fontSize: 10,
+                        ),
+                      ),
+                    ),
+                  ),
+                  topTitles:
+                      const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                  rightTitles:
+                      const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                ),
+                borderData: FlBorderData(show: false),
+                lineBarsData: [
+                  LineChartBarData(
+                    spots: List.generate(records.length, (i) {
+                      return FlSpot(i.toDouble(), records[i].avgScore);
+                    }),
+                    isCurved: true,
+                    color: _kAccent,
+                    barWidth: 2.5,
+                    dotData: FlDotData(
+                      show: true,
+                      getDotPainter: (spot, _, __, ___) =>
+                          FlDotCirclePainter(
+                        radius: 3,
+                        color: _kAccent,
+                        strokeWidth: 0,
+                      ),
+                    ),
+                    belowBarData: BarAreaData(
+                      show: true,
+                      color: _kAccent.withValues(alpha: 0.1),
+                    ),
+                  ),
+                ],
+                lineTouchData: LineTouchData(
+                  touchTooltipData: LineTouchTooltipData(
+                    getTooltipItems: (spots) {
+                      return spots.map((s) {
+                        final r = records[s.x.toInt()];
+                        return LineTooltipItem(
+                          '${r.weekTcnt}회차\n평균 ${r.avgScore}점\n승률 ${r.winRate}%',
+                          GoogleFonts.notoSansKr(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w600,
+                            fontSize: 11,
+                          ),
+                        );
+                      }).toList();
+                    },
+                  ),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              _TmsMiniStat(
+                label: '최근 회차',
+                value: '${latest.weekTcnt}회',
+              ),
+              _TmsMiniStat(
+                label: '평균득점',
+                value: latest.avgScore.toStringAsFixed(1),
+                diff: scoreDiff,
+              ),
+              _TmsMiniStat(
+                label: '승률',
+                value: '${latest.winRate.toStringAsFixed(0)}%',
+                diff: winDiff,
+              ),
+              _TmsMiniStat(
+                label: '입상률',
+                value: '${latest.podiumRate.toStringAsFixed(0)}%',
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _TmsMiniStat extends StatelessWidget {
+  final String label;
+  final String value;
+  final double? diff;
+
+  const _TmsMiniStat({
+    required this.label,
+    required this.value,
+    this.diff,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Expanded(
+      child: Column(
+        children: [
+          Text(
+            label,
+            style: TextStyle(
+              color: Colors.white.withValues(alpha: 0.5),
+              fontSize: 10,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            value,
+            style: GoogleFonts.notoSansKr(
+              color: Colors.white,
+              fontWeight: FontWeight.w700,
+              fontSize: 14,
+            ),
+          ),
+          if (diff != null && diff != 0) ...[
+            const SizedBox(height: 2),
+            Text(
+              '${diff! > 0 ? '+' : ''}${diff!.toStringAsFixed(1)}',
+              style: TextStyle(
+                color: diff! > 0
+                    ? const Color(0xFF22C55E)
+                    : const Color(0xFFEF4444),
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+// ─── Start Info Card (출발 정보) ────────────────────────────────────────────────
+
+class _StartInfoCard extends StatelessWidget {
+  final RacerDetail detail;
+
+  const _StartInfoCard({required this.detail});
+
+  @override
+  Widget build(BuildContext context) {
+    final rate = detail.normalStartRate;
+    final rateColor = rate >= 95
+        ? const Color(0xFF22C55E)
+        : rate >= 80
+            ? const Color(0xFFFBBF24)
+            : const Color(0xFFEF4444);
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: _kCard,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: _kBorder),
+      ),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: _StartStat(
+                  icon: Icons.check_circle_outline,
+                  label: '정상출발률',
+                  value: '${rate.toStringAsFixed(1)}%',
+                  color: rateColor,
+                ),
+              ),
+              Expanded(
+                child: _StartStat(
+                  icon: Icons.sports_score,
+                  label: '정상출발',
+                  value: '${detail.normalStartCount ?? 0}회',
+                  color: const Color(0xFF3B82F6),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: _StartStat(
+                  icon: Icons.warning_amber_rounded,
+                  label: '출발위반',
+                  value: '${detail.violationCount ?? 0}회',
+                  color: (detail.violationCount ?? 0) > 0
+                      ? const Color(0xFFEF4444)
+                      : const Color(0xFF22C55E),
+                ),
+              ),
+              Expanded(
+                child: _StartStat(
+                  icon: Icons.block,
+                  label: '실격',
+                  value: '${detail.eliminationCount ?? 0}회',
+                  color: (detail.eliminationCount ?? 0) > 0
+                      ? const Color(0xFFEF4444)
+                      : const Color(0xFF22C55E),
+                ),
+              ),
+            ],
+          ),
+          if (detail.lastViolation != null &&
+              detail.lastViolation!.isNotEmpty) ...[
+            const Divider(color: _kBorder, height: 24),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(Icons.info_outline,
+                    size: 14,
+                    color: Colors.white.withValues(alpha: 0.4)),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    '최근 위반: ${detail.lastViolation}',
+                    style: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.5),
+                      fontSize: 11,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _StartStat extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final String value;
+  final Color color;
+
+  const _StartStat({
+    required this.icon,
+    required this.label,
+    required this.value,
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Icon(icon, size: 18, color: color),
+        const SizedBox(width: 8),
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              label,
+              style: TextStyle(
+                color: Colors.white.withValues(alpha: 0.5),
+                fontSize: 11,
+              ),
+            ),
+            Text(
+              value,
+              style: GoogleFonts.notoSansKr(
+                fontWeight: FontWeight.w700,
+                color: Colors.white,
+                fontSize: 15,
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+// ─── Course Strategy Card (코스별 우승전법) ──────────────────────────────────────
+
+class _CourseStrategyCard extends StatelessWidget {
+  final RacerDetail detail;
+
+  const _CourseStrategyCard({required this.detail});
+
+  Color _strategyColor(String s) {
+    return switch (s) {
+      '인빠지기' => const Color(0xFF3B82F6),
+      '휘감기' => const Color(0xFFF59E0B),
+      '찌르기' => const Color(0xFFEF4444),
+      '몰기' => const Color(0xFF8B5CF6),
+      '젖히기' => const Color(0xFF22C55E),
+      _ => const Color(0xFF6B7280),
+    };
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final grouped = <String, List<CourseStrategy>>{};
+    for (final cs in detail.courseStrategies) {
+      grouped.putIfAbsent(cs.course, () => []).add(cs);
+    }
+
+    final sortedCourses = grouped.keys.toList()..sort();
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: _kCard,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: _kBorder),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          for (int i = 0; i < sortedCourses.length; i++) ...[
+            if (i > 0) const Divider(color: _kBorder, height: 16),
+            _CourseStrategyRow(
+              course: sortedCourses[i],
+              strategies: grouped[sortedCourses[i]]!,
+              colorFn: _strategyColor,
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _CourseStrategyRow extends StatelessWidget {
+  final String course;
+  final List<CourseStrategy> strategies;
+  final Color Function(String) colorFn;
+
+  const _CourseStrategyRow({
+    required this.course,
+    required this.strategies,
+    required this.colorFn,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final total = strategies.fold<int>(0, (a, b) => a + b.count);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          course,
+          style: GoogleFonts.notoSansKr(
+            color: Colors.white,
+            fontWeight: FontWeight.w700,
+            fontSize: 13,
+          ),
+        ),
+        const SizedBox(height: 8),
+        if (total > 0)
+          ClipRRect(
+            borderRadius: BorderRadius.circular(4),
+            child: SizedBox(
+              height: 8,
+              child: Row(
+                children: strategies.map((s) {
+                  final ratio = s.count / total;
+                  return Expanded(
+                    flex: (ratio * 100).round().clamp(1, 100),
+                    child: Container(color: colorFn(s.strategy)),
+                  );
+                }).toList(),
+              ),
+            ),
+          ),
+        const SizedBox(height: 6),
+        Wrap(
+          spacing: 10,
+          runSpacing: 4,
+          children: strategies.map((s) {
+            final c = colorFn(s.strategy);
+            return Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 8,
+                  height: 8,
+                  decoration: BoxDecoration(
+                    color: c,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+                const SizedBox(width: 4),
+                Text(
+                  '${s.strategy} ${s.count}회',
+                  style: TextStyle(
+                    color: Colors.white.withValues(alpha: 0.7),
+                    fontSize: 11,
+                  ),
+                ),
+              ],
+            );
+          }).toList(),
+        ),
+      ],
     );
   }
 }

@@ -286,24 +286,90 @@ final predictionProvider = FutureProvider.family<RacePrediction,
   return prediction;
 });
 
+Future<RacerDetail> _enrichRacerDetail(
+  BoatRacingApiService api,
+  RacerDetail base,
+) async {
+  final name = base.racerName;
+  final futures = await Future.wait([
+    api.fetchRacerTmsInfo(racerName: name),
+    api.fetchRacerStartInfo(racerName: name),
+    api.fetchCourseWinStrategy(racerName: name),
+  ]);
+
+  final tmsResult = futures[0] as ApiResult<List<Map<String, dynamic>>>;
+  final strtResult = futures[1] as ApiResult<Map<String, dynamic>>;
+  final cwResult = futures[2] as ApiResult<List<Map<String, dynamic>>>;
+
+  List<RacerTmsRecord> tmsRecords = [];
+  if (tmsResult.isSuccess && tmsResult.data != null) {
+    tmsRecords = tmsResult.data!.map((m) => RacerTmsRecord.fromMap(m)).toList()
+      ..sort((a, b) => a.weekTcnt.compareTo(b.weekTcnt));
+  }
+
+  int? normalStart, totalStart, violationCnt, elimCnt;
+  String? lastViol;
+  if (strtResult.isSuccess && strtResult.data != null) {
+    final s = strtResult.data!;
+    normalStart = parseIntVal(s['norm_strt_cnt']);
+    final afNorm = parseIntVal(s['af_norm_strt_cnt']) ?? 0;
+    violationCnt = parseIntVal(s['rect_voil_cnt']) ?? 0;
+    elimCnt = parseIntVal(s['elim_cnt']) ?? 0;
+    totalStart = (normalStart ?? 0) + violationCnt + elimCnt;
+    if (afNorm > 0 && afNorm < (normalStart ?? 0)) {
+      totalStart = normalStart;
+      normalStart = afNorm;
+    }
+    lastViol = s['rect_voil']?.toString();
+  }
+
+  List<CourseStrategy> strategies = [];
+  if (cwResult.isSuccess && cwResult.data != null) {
+    for (final m in cwResult.data!) {
+      final cnt = parseIntVal(m['cnt']) ?? 0;
+      if (cnt <= 0) continue;
+      strategies.add(CourseStrategy(
+        course: m['entry_course']?.toString() ?? '',
+        strategy: m['strategy_cd']?.toString() ?? '',
+        count: cnt,
+        rate: parseDoubleVal(m['rate']) ?? 0,
+      ));
+    }
+    strategies.sort((a, b) => b.count.compareTo(a.count));
+  }
+
+  return base.copyWith(
+    normalStartCount: normalStart,
+    totalStartCount: totalStart,
+    violationCount: violationCnt,
+    eliminationCount: elimCnt,
+    lastViolation: lastViol,
+    tmsRecords: tmsRecords,
+    courseStrategies: strategies,
+  );
+}
+
 /// 선수 상세
 final racerDetailProvider =
     FutureProvider.family<RacerDetail, ({RaceEntry entry})>(
         (ref, params) async {
   final api = ref.watch(boatRacingApiProvider);
   final result = await api.fetchRacerInfo(racerName: params.entry.racerName);
+  RacerDetail base;
   if (result.isSuccess && result.data != null) {
     if (kDebugMode) {
       debugPrint('[Provider] racerDetail(${params.entry.racerName}): API 성공');
     }
-    return RacerDetail.fromApiMap(result.data!, entry: params.entry);
+    base = RacerDetail.fromApiMap(result.data!, entry: params.entry);
+  } else {
+    if (kDebugMode) {
+      debugPrint(
+        '[Provider] racerDetail(${params.entry.racerName}): 목업 (${result.errorMessage})',
+      );
+    }
+    return RacerDetail.fromRaceEntryDetailed(params.entry);
   }
-  if (kDebugMode) {
-    debugPrint(
-      '[Provider] racerDetail(${params.entry.racerName}): 목업 (${result.errorMessage})',
-    );
-  }
-  return RacerDetail.fromRaceEntryDetailed(params.entry);
+  return _enrichRacerDetail(api, base);
 });
 
 /// 선수 상세 (ID 기반)
@@ -316,7 +382,8 @@ final racerDetailByIdProvider =
     if (kDebugMode) {
       debugPrint('[Provider] racerDetailById(${params.racerId}): API 성공');
     }
-    return RacerDetail.fromApiMap(result.data!);
+    final base = RacerDetail.fromApiMap(result.data!);
+    return _enrichRacerDetail(api, base);
   }
   return RacerDetail(
     racerId: params.racerId,

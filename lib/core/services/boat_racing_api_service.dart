@@ -421,6 +421,86 @@ class BoatRacingApiService {
     }
   }
 
+  // ─── 선수 회차별 성적 (컨디션 추이) ───
+
+  Future<ApiResult<List<Map<String, dynamic>>>> fetchRacerTmsInfo({
+    required String racerName,
+    int? year,
+  }) async {
+    try {
+      final targetYear = year ?? DateTime.now().year;
+      final params = {
+        ..._baseParams(numOfRows: 200),
+        'stnd_yr': targetYear.toString(),
+        'racer_nm': racerName,
+      };
+      final res = await _dio.get(ApiConstants.racerTmsInfo, queryParameters: params);
+      final error = _checkApiError(res.data);
+      if (error != null) return ApiResult.failure(error);
+      final items = _extractItems(res.data);
+      final result = items.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+      return ApiResult.success(result);
+    } on DioException catch (e) {
+      return ApiResult.failure(_dioErrorMsg(e));
+    } catch (e) {
+      return ApiResult.failure('파싱 오류: $e');
+    }
+  }
+
+  // ─── 선수 정상출발 정보 ───
+
+  Future<ApiResult<Map<String, dynamic>>> fetchRacerStartInfo({
+    required String racerName,
+    int? year,
+  }) async {
+    try {
+      final targetYear = year ?? DateTime.now().year;
+      final params = {
+        ..._baseParams(numOfRows: 10),
+        'stnd_year': targetYear.toString(),
+        'racer_nm': racerName,
+      };
+      final res = await _dio.get(ApiConstants.racerStrt, queryParameters: params);
+      final error = _checkApiError(res.data);
+      if (error != null) return ApiResult.failure(error);
+      final items = _extractItems(res.data);
+      if (items.isNotEmpty) {
+        return ApiResult.success(Map<String, dynamic>.from(items.first as Map));
+      }
+      return const ApiResult.failure('정상출발 정보 없음');
+    } on DioException catch (e) {
+      return ApiResult.failure(_dioErrorMsg(e));
+    } catch (e) {
+      return ApiResult.failure('파싱 오류: $e');
+    }
+  }
+
+  // ─── 코스별 우승전법 ───
+
+  Future<ApiResult<List<Map<String, dynamic>>>> fetchCourseWinStrategy({
+    required String racerName,
+    int? year,
+  }) async {
+    try {
+      final targetYear = year ?? DateTime.now().year;
+      final params = {
+        ..._baseParams(numOfRows: 200),
+        'stnd_year': targetYear.toString(),
+        'racer_nm': racerName,
+      };
+      final res = await _dio.get(ApiConstants.courseWin, queryParameters: params);
+      final error = _checkApiError(res.data);
+      if (error != null) return ApiResult.failure(error);
+      final items = _extractItems(res.data);
+      final result = items.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+      return ApiResult.success(result);
+    } on DioException catch (e) {
+      return ApiResult.failure(_dioErrorMsg(e));
+    } catch (e) {
+      return ApiResult.failure('파싱 오류: $e');
+    }
+  }
+
   // ─── 연결 테스트 ───
 
   Future<ApiResult<String>> testConnection() async {
