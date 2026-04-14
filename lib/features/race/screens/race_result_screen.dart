@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../../core/constants/api_constants.dart';
 import '../../../models/prediction.dart';
+import '../../../models/race.dart';
 import '../../../models/race_entry.dart';
 import '../../../models/race_result.dart';
 import '../providers/race_providers.dart';
@@ -23,6 +24,13 @@ const _border = Color(0xFF30363D);
 
 bool _isNotYet(Object? error) =>
     error is Exception && error.toString().contains('NOT_YET');
+
+int? _rankValue(Map<String, dynamic> row) {
+  final rankRaw = row['race_rank'] ?? row['rank'];
+  if (rankRaw is int) return rankRaw;
+  if (rankRaw is num) return rankRaw.toInt();
+  return int.tryParse('$rankRaw');
+}
 
 int? _courseNo(Map<String, dynamic> row) {
   final v = row['course_no'];
@@ -124,20 +132,58 @@ class _RaceResultScreenState extends ConsumerState<RaceResultScreen> {
     final predAsync = ref.watch(predictionProvider(p));
     final racesAsync = ref.watch(raceListProvider((date: widget.date)));
 
-    final preRace = (resultAsync.hasError && _isNotYet(resultAsync.error)) ||
-        (rankAsync.hasError && _isNotYet(rankAsync.error));
-
     String venueName = '미사리경정공원';
-    String raceStatus = preRace ? '예정' : '종료';
-    racesAsync.whenData((ds) {
-      final match = ds.data.where((r) => r.raceNo == widget.raceNo);
-      if (match.isNotEmpty) {
-        venueName = match.first.venueName;
-        raceStatus = match.first.status;
-      } else if (ds.data.isNotEmpty) {
-        venueName = ds.data.first.venueName;
+    String raceStatus = '예정';
+    final raceList = racesAsync.valueOrNull?.data ?? const <Race>[];
+    if (raceList.isNotEmpty) {
+      Race? matchedRace;
+      for (final r in raceList) {
+        if (r.raceNo == widget.raceNo) {
+          matchedRace = r;
+          break;
+        }
       }
-    });
+      final baseRace = matchedRace ?? raceList.first;
+      venueName = baseRace.venueName;
+      raceStatus = baseRace.status;
+    }
+
+    final rankRows = rankAsync.valueOrNull ?? const <Map<String, dynamic>>[];
+    final finalizedRanks = rankRows
+        .where((r) {
+          final rank = _rankValue(r);
+          return rank != null && rank > 0;
+        })
+        .toList()
+      ..sort((a, b) => (_rankValue(a) ?? 99).compareTo(_rankValue(b) ?? 99));
+
+    final hasResultData = resultAsync.valueOrNull != null;
+    final hasFinalRankData = finalizedRanks.isNotEmpty;
+    final resultNotYet = resultAsync.hasError && _isNotYet(resultAsync.error);
+    final rankNotYet = rankAsync.hasError && _isNotYet(rankAsync.error);
+    final isMarkedFinished =
+        raceStatus == '확정' || raceStatus == '종료' || raceStatus == '완료';
+
+    final preRace = !isMarkedFinished &&
+        !hasResultData &&
+        !hasFinalRankData &&
+        (resultNotYet || rankNotYet);
+
+    RaceResult? fallbackResult;
+    if (!hasResultData && finalizedRanks.length >= 3) {
+      fallbackResult = RaceResult(
+        raceNo: widget.raceNo,
+        first: _racerNm(finalizedRanks[0]),
+        firstNo: _courseNo(finalizedRanks[0]) ?? 0,
+        second: _racerNm(finalizedRanks[1]),
+        secondNo: _courseNo(finalizedRanks[1]) ?? 0,
+        third: _racerNm(finalizedRanks[2]),
+        thirdNo: _courseNo(finalizedRanks[2]) ?? 0,
+        winOdds: 0,
+        placeOdds: 0,
+        quinellaOdds: 0,
+      );
+    }
 
     final bottomPadding = MediaQuery.paddingOf(context).bottom;
 
@@ -212,12 +258,18 @@ class _RaceResultScreenState extends ConsumerState<RaceResultScreen> {
                               child:
                                   CircularProgressIndicator(color: _accent)),
                         ),
-                        error: (e, _) => Padding(
-                          padding: const EdgeInsets.all(16),
-                          child: Text('$e',
-                              style:
-                                  const TextStyle(color: Colors.white70)),
-                        ),
+                        error: (e, _) {
+                          if (_isNotYet(e) && fallbackResult != null) {
+                            return _PodiumSection(result: fallbackResult);
+                          }
+                          return Padding(
+                            padding: const EdgeInsets.all(16),
+                            child: Text(
+                              _isNotYet(e) ? '경주 결과 집계 중입니다.' : '경주 결과를 불러오지 못했습니다.',
+                              style: const TextStyle(color: Colors.white70),
+                            ),
+                          );
+                        },
                       ),
                       const SizedBox(height: 24),
                       _buildComparison(entriesAsync, predAsync, resultAsync),
@@ -237,7 +289,19 @@ class _RaceResultScreenState extends ConsumerState<RaceResultScreen> {
                                     child: CircularProgressIndicator(
                                         color: _accent)),
                               ),
-                        error: (_, __) => const SizedBox.shrink(),
+                        error: (_, __) {
+                          final r = resultAsync.valueOrNull ?? fallbackResult;
+                          if (r != null && r.first.isNotEmpty) {
+                            return _RankListSection(ranks: [
+                              {'rank': 1, 'course_no': r.firstNo, 'racer_nm': r.first},
+                              if (r.second.isNotEmpty)
+                                {'rank': 2, 'course_no': r.secondNo, 'racer_nm': r.second},
+                              if (r.third.isNotEmpty)
+                                {'rank': 3, 'course_no': r.thirdNo, 'racer_nm': r.third},
+                            ]);
+                          }
+                          return const SizedBox.shrink();
+                        },
                       ),
                     ],
                     const SizedBox(height: 16),
@@ -951,8 +1015,77 @@ class _OddsSection extends StatelessWidget {
 
   final RaceResult result;
 
+  Widget _courseChip(int no) {
+    return Container(
+      width: 22,
+      height: 22,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: _courseColor(no),
+      ),
+      alignment: Alignment.center,
+      child: Text(
+        '$no',
+        style: TextStyle(
+          color: _courseTextColor(no),
+          fontWeight: FontWeight.w700,
+          fontSize: 11,
+        ),
+      ),
+    );
+  }
+
+  Widget _arrow() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 3),
+      child: Icon(Icons.arrow_forward, size: 12, color: Colors.grey.shade500),
+    );
+  }
+
+  Widget _dash() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 3),
+      child: Text('–', style: TextStyle(color: Colors.grey.shade500, fontSize: 13)),
+    );
+  }
+
+  Widget _comboOrdered(List<int> courses) {
+    final children = <Widget>[];
+    for (int i = 0; i < courses.length; i++) {
+      if (courses[i] <= 0) continue;
+      if (children.isNotEmpty) children.add(_arrow());
+      children.add(_courseChip(courses[i]));
+    }
+    return Row(mainAxisSize: MainAxisSize.min, children: children);
+  }
+
+  Widget _comboUnordered(List<int> courses) {
+    final children = <Widget>[];
+    for (int i = 0; i < courses.length; i++) {
+      if (courses[i] <= 0) continue;
+      if (children.isNotEmpty) children.add(_dash());
+      children.add(_courseChip(courses[i]));
+    }
+    return Row(mainAxisSize: MainAxisSize.min, children: children);
+  }
+
+  Widget _comboSemiOrdered(int first, List<int> rest) {
+    final children = <Widget>[_courseChip(first)];
+    children.add(_arrow());
+    for (int i = 0; i < rest.length; i++) {
+      if (rest[i] <= 0) continue;
+      if (i > 0) children.add(_dash());
+      children.add(_courseChip(rest[i]));
+    }
+    return Row(mainAxisSize: MainAxisSize.min, children: children);
+  }
+
   @override
   Widget build(BuildContext context) {
+    final f = result.firstNo;
+    final s = result.secondNo;
+    final t = result.thirdNo;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -981,9 +1114,42 @@ class _OddsSection extends StatelessWidget {
           ),
           child: Column(
             children: [
-              _OddRow(label: '단승', value: result.winOdds),
-              _OddRow(label: '복승', value: result.placeOdds),
-              _OddRow(label: '연승', value: result.quinellaOdds, isLast: true),
+              _OddRow(
+                label: '단승',
+                value: result.winOdds,
+                combination: f > 0 ? _comboOrdered([f]) : null,
+              ),
+              _OddRow(
+                label: '연승',
+                value: result.placeOdds,
+                combination: f > 0 ? _comboUnordered([f, s]) : null,
+              ),
+              _OddRow(
+                label: '쌍승',
+                value: result.exactaOdds,
+                combination: f > 0 ? _comboOrdered([f, s]) : null,
+              ),
+              _OddRow(
+                label: '복승',
+                value: result.quinellaOdds,
+                combination: f > 0 ? _comboUnordered([f, s]) : null,
+              ),
+              _OddRow(
+                label: '삼복승',
+                value: result.triellaOdds,
+                combination: f > 0 ? _comboUnordered([f, s, t]) : null,
+              ),
+              _OddRow(
+                label: '쌍복승',
+                value: result.xlaOdds,
+                combination: f > 0 ? _comboSemiOrdered(f, [s, t]) : null,
+              ),
+              _OddRow(
+                label: '삼쌍승',
+                value: result.trxOdds,
+                combination: f > 0 ? _comboOrdered([f, s, t]) : null,
+                isLast: true,
+              ),
             ],
           ),
         ),
@@ -996,22 +1162,34 @@ class _OddRow extends StatelessWidget {
   const _OddRow({
     required this.label,
     required this.value,
+    this.combination,
     this.isLast = false,
   });
 
   final String label;
   final double value;
+  final Widget? combination;
   final bool isLast;
 
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: EdgeInsets.only(bottom: isLast ? 0 : 10),
+      padding: EdgeInsets.only(bottom: isLast ? 0 : 12),
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(label,
-              style: TextStyle(color: Colors.grey.shade400, fontSize: 14)),
+          SizedBox(
+            width: 52,
+            child: Text(
+              label,
+              style: TextStyle(color: Colors.grey.shade400, fontSize: 14),
+            ),
+          ),
+          if (combination != null) ...[
+            const SizedBox(width: 4),
+            Expanded(child: combination!),
+          ] else
+            const Spacer(),
+          const SizedBox(width: 8),
           Text(
             value > 0 ? value.toStringAsFixed(1) : '-',
             style: const TextStyle(
@@ -1216,34 +1394,15 @@ class _VideoRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Expanded(
-          child: _VideoChip(
-            icon: Icons.videocam_outlined,
-            label: '소개항주',
-            color: const Color(0xFF64B5F6),
-            onTap: () => _launch(
-              context,
-              ApiConstants.introVideoUrl(date, raceNo),
-              '소개항주',
-            ),
-          ),
-        ),
-        const SizedBox(width: 10),
-        Expanded(
-          child: _VideoChip(
-            icon: Icons.play_circle_outline,
-            label: '경주영상',
-            color: const Color(0xFFEF5350),
-            onTap: () => _launch(
-              context,
-              ApiConstants.raceVideoUrl(date, raceNo),
-              '경주',
-            ),
-          ),
-        ),
-      ],
+    return _VideoChip(
+      icon: Icons.play_circle_outline,
+      label: '경주영상',
+      color: const Color(0xFFEF5350),
+      onTap: () => _launch(
+        context,
+        ApiConstants.raceVideoUrl(date, raceNo),
+        '경주',
+      ),
     );
   }
 }

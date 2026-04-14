@@ -1,4 +1,4 @@
-package com.kboat.racing
+package com.boat_racing
 
 import io.flutter.embedding.android.FlutterActivity
 

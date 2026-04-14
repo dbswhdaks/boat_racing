@@ -63,7 +63,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         _refreshNow();
       }
     });
-    _displayTimer = Timer.periodic(const Duration(seconds: 10), (_) {
+    _displayTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted) setState(() {});
     });
   }
@@ -211,9 +211,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                     autoRefreshEnabled: autoOn,
                   );
                 }
+                final bottomSafe = MediaQuery.of(context).padding.bottom;
                 return ListView.builder(
-                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
-                  itemCount: races.length + (wrapped.apiError != null && !wrapped.fromApi ? 1 : 0),
+                  padding: EdgeInsets.fromLTRB(16, 0, 16, 24 + bottomSafe),
+                  itemCount:
+                      races.length + (wrapped.apiError != null && !wrapped.fromApi ? 1 : 0),
                   itemBuilder: (context, index) {
                     if (wrapped.apiError != null && !wrapped.fromApi && index == 0) {
                       return Padding(
@@ -243,9 +245,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                         ),
                       );
                     }
-                    final i = wrapped.apiError != null && !wrapped.fromApi
-                        ? index - 1
-                        : index;
+                    final i = wrapped.apiError != null && !wrapped.fromApi ? index - 1 : index;
                     return Padding(
                       padding: const EdgeInsets.only(bottom: 12),
                       child: RaceCard(race: races[i]),

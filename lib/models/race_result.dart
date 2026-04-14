@@ -9,6 +9,10 @@ class RaceResult {
   final double winOdds;
   final double placeOdds;
   final double quinellaOdds;
+  final double exactaOdds;
+  final double triellaOdds;
+  final double xlaOdds;
+  final double trxOdds;
 
   const RaceResult({
     required this.raceNo,
@@ -21,5 +25,9 @@ class RaceResult {
     this.winOdds = 0,
     this.placeOdds = 0,
     this.quinellaOdds = 0,
+    this.exactaOdds = 0,
+    this.triellaOdds = 0,
+    this.xlaOdds = 0,
+    this.trxOdds = 0,
   });
 }

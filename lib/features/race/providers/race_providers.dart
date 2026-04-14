@@ -179,7 +179,24 @@ final oddsProvider = FutureProvider.family<Odds, ({String date, int raceNo})>(
 final raceResultProvider = FutureProvider.family<RaceResult,
     ({String date, int raceNo})>((ref, params) async {
   final api = ref.watch(boatRacingApiProvider);
+  final kboat = ref.watch(kboatScraperProvider);
 
+  // KBOAT 우선 (정확한 착순 + 배당률 7종 제공)
+  if (params.date == todayYmd) {
+    try {
+      final bundle = await kboat.fetchTodayResults();
+      if (bundle != null && bundle.results.containsKey(params.raceNo)) {
+        if (kDebugMode) {
+          debugPrint('[Provider] raceResult(R${params.raceNo}): KBOAT 사용');
+        }
+        return bundle.results[params.raceNo]!;
+      }
+    } catch (e) {
+      if (kDebugMode) debugPrint('[Provider] raceResult KBOAT 실패: $e');
+    }
+  }
+
+  // 공공 API fallback
   final result = await api.fetchRaceResult(date: params.date, rcNo: params.raceNo);
   if (result.isSuccess && result.data != null && result.data!.isNotEmpty) {
     return result.data!.first;
@@ -192,13 +209,64 @@ final raceResultProvider = FutureProvider.family<RaceResult,
 final raceRankProvider = FutureProvider.family<List<Map<String, dynamic>>,
     ({String date, int raceNo})>((ref, params) async {
   final api = ref.watch(boatRacingApiProvider);
+  final kboat = ref.watch(kboatScraperProvider);
 
-  final result = await api.fetchRaceRank(date: params.date, rcNo: params.raceNo);
-  if (result.isSuccess && result.data != null && result.data!.isNotEmpty) {
-    return result.data!;
+  List<Map<String, dynamic>> top3 = [];
+
+  // KBOAT 착순 (1~3위)
+  if (params.date == todayYmd) {
+    try {
+      final bundle = await kboat.fetchTodayResults();
+      if (bundle != null && bundle.ranks.containsKey(params.raceNo)) {
+        top3 = bundle.ranks[params.raceNo]!;
+      }
+    } catch (e) {
+      if (kDebugMode) debugPrint('[Provider] raceRank KBOAT 실패: $e');
+    }
   }
 
-  throw Exception('NOT_YET');
+  // 공공 API (race_rank 필드가 있으면 그대로 사용)
+  if (top3.isEmpty) {
+    final result = await api.fetchRaceRank(date: params.date, rcNo: params.raceNo);
+    if (result.isSuccess && result.data != null && result.data!.isNotEmpty) {
+      final hasRank = result.data!.any((m) =>
+          m['race_rank'] != null || m['rank'] != null);
+      if (hasRank) return result.data!;
+    }
+  }
+
+  if (top3.isEmpty) throw Exception('NOT_YET');
+
+  // 출주표에서 나머지 선수 보충 → 전체 착순 표시
+  try {
+    final entriesResult = await ref.watch(raceEntriesProvider((
+      date: params.date, raceNo: params.raceNo,
+    )).future);
+    final entries = entriesResult.data;
+    if (entries.isNotEmpty) {
+      final rankedCourses = top3.map((r) => r['course_no'] as int).toSet();
+      final remaining = entries
+          .where((e) => !rankedCourses.contains(e.courseNo))
+          .toList()
+        ..sort((a, b) => a.courseNo.compareTo(b.courseNo));
+
+      int nextRank = top3.length + 1;
+      for (final e in remaining) {
+        top3.add({
+          'rank': nextRank,
+          'race_rank': nextRank,
+          'course_no': e.courseNo,
+          'racer_nm': e.racerName,
+        });
+        nextRank++;
+      }
+    }
+  } catch (_) {}
+
+  if (kDebugMode) {
+    debugPrint('[Provider] raceRank(R${params.raceNo}): ${top3.length}명 (KBOAT+출주표)');
+  }
+  return top3;
 });
 
 /// AI 예측

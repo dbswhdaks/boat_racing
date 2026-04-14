@@ -66,8 +66,8 @@ class _RaceCardState extends State<RaceCard> {
   }
 
   Duration? _timeUntilStart(Race r) {
-    final t = r.departureTime;
-    if (t == null) return null;
+    final t = r.effectiveDepartureTime;
+    if (t.isEmpty) return null;
     final parts = t.split(':');
     if (parts.length < 2) return null;
     final h = int.tryParse(parts[0].trim()) ?? 0;
@@ -85,8 +85,10 @@ class _RaceCardState extends State<RaceCard> {
     if (d.isNegative) return '진행중';
     final h = d.inHours;
     final m = d.inMinutes.remainder(60);
-    if (h > 0) return '$h시간 ${m}분 후';
-    return '${m}분 후';
+    final s = d.inSeconds.remainder(60);
+    if (h > 0) return '$h시간 ${m}분 ${s}초 후';
+    if (m > 0) return '${m}분 ${s}초 후';
+    return '${s}초 후';
   }
 
   Color _raceNoColor(int no) {
@@ -106,7 +108,7 @@ class _RaceCardState extends State<RaceCard> {
     final r = widget.race;
     final finished = _isFinished(r);
     final diff = _timeUntilStart(r);
-    final timeStr = r.departureTime ?? '';
+    final timeStr = r.effectiveDepartureTime;
     final rColor = _raceNoColor(r.raceNo);
     final hasDiff = !finished && diff != null && diff > Duration.zero;
 

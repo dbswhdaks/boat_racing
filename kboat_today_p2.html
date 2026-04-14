@@ -1,0 +1,425 @@
+<div class="layoutContArea">
+		<form id="search-frm" method="post" onsubmit="return false;">
+			<input type="hidden" name="pagination.currentPage" value="2">
+
+			<div class="cptSchRst">
+				<div class="schRstArea">
+					<!-- 좌측 검색 영역  -->
+					<div class="rstLe">
+						
+    <div class="comSchDetail">
+        <div class="detBox toggleMenu"><!-- toggleMenu로 스타일 변형 -->
+            <div class="searchOptionBox">
+                <dl>
+                    <dt>경주일</dt>
+                    <dd>
+                        <div class="innerBox">
+                            <div class="frmGroup">
+                                <div class="frmBox">
+                                    <input type="radio" id="rdo1-1" class="iptRdoChk" name="dateRange" value="T" title="오늘" onclick="fnChangeDateRangeOne('T')">
+                                    <label for="rdo1-1">오늘</label>
+                                </div>
+                                <div class="frmBox">
+                                    <input type="radio" id="rdo1-2" class="iptRdoChk" name="dateRange" value="W" title="최근1주" onclick="fnChangeDateRangeOne('W')">
+                                    <label class="rdo1-2">최근1주</label>
+                                </div>
+                                <div class="frmBox">
+                                    <input type="radio" id="rdo1-3" class="iptRdoChk" name="dateRange" value="M" title="최근1달" onclick="fnChangeDateRangeOne('M')">
+                                    <label class="rdo1-3">최근1달</label>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="innerBox">
+                            <div class="subMenu">
+                                <p>직접입력</p>
+                                <ul class="datePick">
+                                    <li>
+                                        <div class="tui-datepicker-input tui-datetime-input tui-has-focus frmBox">
+                                            <input id="startpicker-input02" type="text" aria-label="Date" name="startDate" value="2026.04.14" title="검색 시작일"  autocomplete="off">
+                                            <div id="startpicker-container02" style="margin-left: -1px;"></div>
+                                        </div>
+                                    </li>
+                                    <li class="hpn">-</li>
+                                    <li>
+                                        <div class="tui-datepicker-input tui-datetime-input tui-has-focus frmBox">
+                                            <input id="endpicker-input02" type="text" aria-label="Date" name="endDate" value="2026.04.14" title="검색 종료일"  autocomplete="off">
+                                            <div id="endpicker-container02" style="margin-left: -1px;"></div>
+                                        </div>
+                                    </li>
+                                </ul>
+                                <script type="text/javascript">
+                                    var startDt = "2026.04.14" || null;
+                                    var endDt = "2026.04.14" || null;
+                                    fnDatePickerOne(startDt, endDt);
+                                    if(!startDt) {
+                                        document.querySelector("input[name='startDate']").value = "";
+                                    }
+                                    if(!endDt) {
+                                        document.querySelector("input[name='endDate']").value = "";
+                                    }
+
+                                    const startPicker = document.getElementById("startpicker-input02"); 
+                                    const endPicker = document.getElementById("endpicker-input02");
+                                    
+                                     startPicker.addEventListener("change", function(){
+                                     	if(!this.value) return;
+                                     	fnResetDateRange();
+                                     });
+                                     
+                                     endPicker.addEventListener("change", function(){
+                                     	if(!this.value) return;
+                                     	fnResetDateRange1();
+                                     }); 
+                                     
+                                     function fnDatePickerOne(startDt, endDt) {
+                                    		const startPicker = {};
+                                    		startPicker.input = '#startpicker-input02';
+                                    		startPicker.container = '#startpicker-container02';
+                                    		if(startDt) {
+                                    			startPicker.date = new Date(startDt);
+                                    		} else {
+                                    			startPicker.date = new Date();
+                                    		}
+
+                                    		const endPicker = {};
+                                    		endPicker.input = '#endpicker-input02';
+                                    		endPicker.container = '#endpicker-container02';
+                                    		if(endDt) {
+                                    			endPicker.date = new Date(endDt);
+                                    		} else {
+                                    			endPicker.date = new Date();
+                                    		}
+
+                                    		const picker = tui.DatePicker.createRangePicker({
+                                    			startpicker: startPicker,
+                                    			endpicker: endPicker,
+                                    			format: 'YYYY.MM.dd',
+                                    			language: 'ko',
+                                    		});
+
+                                    		picker.on('change:start', async () => {
+                                    			fnResetDateRange();
+                                    		});
+                                    		picker.on('change:end', async () => {
+                                    			fnResetDate1();
+                                    		}); 
+
+                                    		function fnResetDateRange() {
+		                                    	const startDate = new Date(document.querySelector("input[name='startDate']").value);
+		                                    	const startDateTemp = this.addOneMonth(startDate);
+		                                    	document.querySelector("input[name='endDate']").value = `${startDateTemp.toISOString().slice(0,10)}`.replaceAll('-','.');
+	                                        	
+		                                     	const dateRanges = document.querySelectorAll("input[name=dateRange]");
+                                    			if(dateRanges) {
+                                    				for(const dateRang of dateRanges) {
+                                    					dateRang.checked = false;
+                                    				}
+                                    			} 
+		                                    
+                                    		}
+                                    		
+                                    		function fnResetDate1() {
+                                    			const endDate = new Date(document.querySelector("input[name='endDate']").value);
+                                    			const endDateTemp = this.subtractOneMonth(endDate);
+	                                        	document.querySelector("input[name='startDate']").value = `${endDateTemp.toISOString().slice(0,10)}`.replaceAll('-','.');
+	                                        	const dateRanges = document.querySelectorAll("input[name=dateRange]");
+                                    			if(dateRanges) {
+                                    				for(const dateRang of dateRanges) {
+                                    					dateRang.checked = false;
+                                    				}
+                                    			}
+                                    		}
+                                    	}
+                                    
+	                                   //검색기간: 범위
+	                             		function fnChangeDateRangeOne(range) {
+	                             			const form = document.querySelector("#search-frm");
+	                             			if(range == "T") {
+	                             				const now = new Date();
+	                             				fnDatePickerOne(now.toLocaleDateString(), now.toLocaleDateString());
+	                             			} else if(range == "W") {
+	                             				const now = new Date();
+	                             				const wd = new Date();
+	                             				wd.setDate(now.getDate() - 7);
+	                             				fnDatePickerOne(wd.toLocaleDateString(), now.toLocaleDateString());
+	                             			} else if(range == "M") {
+	                             				const now = new Date();
+	                             				const md = new Date();
+	                             				md.setMonth(now.getMonth() - 1);
+	                             				fnDatePickerOne(md.toLocaleDateString(), now.toLocaleDateString());
+	                             			}
+	                             		}
+                                    	
+                                    	function addOneMonth(date){
+                                    		const year = date.getFullYear(); 
+                                    		const month = date.getMonth();
+                                    		const day = date.getDate();
+                                    		
+                                    		const nextMonth = new Date(year,month +1, day);
+                                    		
+                                    		if(nextMonth.getDate() !== day){
+                                    			nextMonth.setDate(0);
+                                    		}
+                                    		return nextMonth;
+                                    	}
+                                    	
+                                    	function subtractOneMonth(date){
+                                    		const year = date.getFullYear(); 
+                                    		const month = date.getMonth();
+                                    		const day = date.getDate();
+                                    		
+                                    		const nextMonth = new Date(year,month -1, day);
+                                    		
+                                    		if(nextMonth.getDate() !== day){
+                                    			nextMonth.setDate(0);
+                                    		}
+                                    		return nextMonth;
+                                    	}
+                                </script>
+                            </div>
+                        </div>
+                        <div class="innerBox">
+                            <div class="subMenu">
+                                <div class="schBox">
+                                    <div class="schBtn"><button type="button" onclick="fnSearch()">검색</button></div>
+                                    <button type="button" class="schDet" onclick="fnDetailToggle()">상세검색</button>
+                                </div>
+                            </div>
+                        </div>
+                    </dd>
+                </dl>
+            </div>
+
+            <div class="searchOptionBox">
+                <dl>
+                    <dt>선수명</dt>
+                    <dd>
+                        <div class="innerBox">
+                            <div class="frmBox">
+                                <input type="text" class="iptText" name="racerNm" placeholder="선수명을 입력하세요." title="선수명" value="" maxlength="10" >
+                            </div>
+                        </div>
+                    </dd>
+                </dl>
+            </div>
+
+            <div class="searchOptionBox">
+                <dl>
+                    <dt>기수정보</dt>
+                    <dd>
+                        <div class="innerBox">
+                            <div class="frmBox">
+                                <select class="iptSlt" name="gisu" title="기수 선택">
+                                    <option value="">전체</option>
+                                    <option value="01">01기</option>
+                                    <option value="02">02기</option>
+                                    <option value="03">03기</option>
+                                    <option value="04">04기</option>
+                                    <option value="05">05기</option>
+                                    <option value="06">06기</option>
+                                    <option value="07">07기</option>
+                                    <option value="08">08기</option>
+                                    <option value="09">09기</option>
+                                    <option value="10">10기</option>
+                                    <option value="11">11기</option>
+                                    <option value="12">12기</option>
+                                    <option value="13">13기</option>
+                                    <option value="14">14기</option>
+                                    <option value="15">15기</option>
+                                    <option value="16">16기</option>
+                                    <option value="17">17기</option>
+                                </select>
+                            </div>
+                        </div>
+                    </dd>
+                </dl>
+            </div>
+            <div class="searchOptionBox">
+                <dl>
+                    <dt>배당률</dt>
+                    <dd class="noWrap">
+                        <div class="innerBox">
+                            <div class="frmGroup basicForm">
+                                <div class="frmBox">
+                                    <input type="text" class="iptText" name="payOffMin" oninput="fnOnlyNum2(this);" placeholder="최저 배당률" title="최저 배당률" value="" maxlength="8">
+                                </div>
+                                <div class="textBox">-</div>
+                                <div class="frmBox">
+                                    <input type="text" class="iptText" name="payOffMax" oninput="fnOnlyNum2(this);" placeholder="최고 배당률" title="최고 배당률" value="" maxlength="8" >
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="innerBox">
+                            <div class="subMenu">
+                                <p>승식<span>(중복선택가능)</span></p>
+                                <div class="frmGroup gridItem4">
+                                    <div class="frmBox">
+                                        <input type="checkbox" name="poolCd" id="rdo6-2" value="WIN" title="단승" class="iptRdoChk">
+                                        <label for="rdo6-2">단승</label>
+                                    </div>
+                                    <div class="frmBox">
+                                        <input type="checkbox" name="poolCd" id="rdo6-3" value="PLACE" title="연승" class="iptRdoChk">
+                                        <label for="rdo6-3">연승</label>
+                                    </div>
+                                    <div class="frmBox">
+                                        <input type="checkbox" name="poolCd" id="rdo6-4" value="EXACTA" title="쌍승" class="iptRdoChk">
+                                        <label for="rdo6-4">쌍승</label>
+                                    </div>
+                                    <div class="frmBox">
+                                        <input type="checkbox" name="poolCd" id="rdo6-5" value="QUINELLA" title="복승" class="iptRdoChk">
+                                        <label for="rdo6-5">복승</label>
+                                    </div>
+                                    <div class="frmBox">
+                                        <input type="checkbox" name="poolCd" id="rdo6-6" value="TRIELLA" title="삼복승" class="iptRdoChk">
+                                        <label for="rdo6-6">삼복승</label>
+                                    </div>
+                                    <div class="frmBox">
+                                        <input type="checkbox" name="poolCd" id="rdo6-7" value="XLA" title="쌍복승" class="iptRdoChk">
+                                        <label for="rdo6-7">쌍복승</label>
+                                    </div>
+                                    <div class="frmBox">
+                                        <input type="checkbox" name="poolCd" id="rdo6-8" value="TRX" title="삼쌍승" class="iptRdoChk">
+                                        <label for="rdo6-8">삼쌍승</label>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </dd>
+                </dl>
+            </div>
+        </div>
+    </div>
+
+					</div>
+					<!-- //좌측 검색 영역  -->
+				</div>
+			</div>
+
+			<div class="cptSchRstCont" id="scroll-top">
+				<div class="ctt">
+					<div class="thumGall fullSize">
+						<div class="list">
+							<a href="javascript: void(0)">
+								<div class="thum">
+									<img src="https://cast.kcycle.or.kr/vod/mbr/2026/04/14/2026041405.jpg" onerror="this.src=&#39;/images/common/thum_16_9_b.jpg&#39;" alt="경주동영상 썸네일">
+								</div>
+								<div class="videoPlayback">
+									<button type="button" class="btnPlayIntro" onclick="fnVideo.popup(&#39;race&#39;, &quot;2026&quot;, &quot;16&quot;, &quot;1&quot;, &quot;05&quot;, &#39;I&#39;)">
+										<span>소개항주</span>
+									</button>
+									<button type="button" class="btnPlayRace" onclick="fnVideo.popup(&#39;race&#39;, &quot;2026&quot;, &quot;16&quot;, &quot;1&quot;, &quot;05&quot;, &#39;B&#39;)">
+										<span>경주장면</span>
+									</button>
+								</div>
+								<div class="thumTit">2026년 16회 1일차 05경주(04월 14일)</div>
+								<ul class="bbsDate">
+									<li class="item date">2026.04.14</li>
+								</ul>
+							</a>
+						</div>
+						<div class="list">
+							<a href="javascript: void(0)">
+								<div class="thum">
+									<img src="https://cast.kcycle.or.kr/vod/mbr/2026/04/14/2026041404.jpg" onerror="this.src=&#39;/images/common/thum_16_9_b.jpg&#39;" alt="경주동영상 썸네일">
+								</div>
+								<div class="videoPlayback">
+									<button type="button" class="btnPlayIntro" onclick="fnVideo.popup(&#39;race&#39;, &quot;2026&quot;, &quot;16&quot;, &quot;1&quot;, &quot;04&quot;, &#39;I&#39;)">
+										<span>소개항주</span>
+									</button>
+									<button type="button" class="btnPlayRace" onclick="fnVideo.popup(&#39;race&#39;, &quot;2026&quot;, &quot;16&quot;, &quot;1&quot;, &quot;04&quot;, &#39;B&#39;)">
+										<span>경주장면</span>
+									</button>
+								</div>
+								<div class="thumTit">2026년 16회 1일차 04경주(04월 14일)</div>
+								<ul class="bbsDate">
+									<li class="item date">2026.04.14</li>
+								</ul>
+							</a>
+						</div>
+						<div class="list">
+							<a href="javascript: void(0)">
+								<div class="thum">
+									<img src="https://cast.kcycle.or.kr/vod/mbr/2026/04/14/2026041403.jpg" onerror="this.src=&#39;/images/common/thum_16_9_b.jpg&#39;" alt="경주동영상 썸네일">
+								</div>
+								<div class="videoPlayback">
+									<button type="button" class="btnPlayIntro" onclick="fnVideo.popup(&#39;race&#39;, &quot;2026&quot;, &quot;16&quot;, &quot;1&quot;, &quot;03&quot;, &#39;I&#39;)">
+										<span>소개항주</span>
+									</button>
+									<button type="button" class="btnPlayRace" onclick="fnVideo.popup(&#39;race&#39;, &quot;2026&quot;, &quot;16&quot;, &quot;1&quot;, &quot;03&quot;, &#39;B&#39;)">
+										<span>경주장면</span>
+									</button>
+								</div>
+								<div class="thumTit">2026년 16회 1일차 03경주(04월 14일)</div>
+								<ul class="bbsDate">
+									<li class="item date">2026.04.14</li>
+								</ul>
+							</a>
+						</div>
+						<div class="list">
+							<a href="javascript: void(0)">
+								<div class="thum">
+									<img src="https://cast.kcycle.or.kr/vod/mbr/2026/04/14/2026041402.jpg" onerror="this.src=&#39;/images/common/thum_16_9_b.jpg&#39;" alt="경주동영상 썸네일">
+								</div>
+								<div class="videoPlayback">
+									<button type="button" class="btnPlayIntro" onclick="fnVideo.popup(&#39;race&#39;, &quot;2026&quot;, &quot;16&quot;, &quot;1&quot;, &quot;02&quot;, &#39;I&#39;)">
+										<span>소개항주</span>
+									</button>
+									<button type="button" class="btnPlayRace" onclick="fnVideo.popup(&#39;race&#39;, &quot;2026&quot;, &quot;16&quot;, &quot;1&quot;, &quot;02&quot;, &#39;B&#39;)">
+										<span>경주장면</span>
+									</button>
+								</div>
+								<div class="thumTit">2026년 16회 1일차 02경주(04월 14일)</div>
+								<ul class="bbsDate">
+									<li class="item date">2026.04.14</li>
+								</ul>
+							</a>
+						</div>
+						<div class="list">
+							<a href="javascript: void(0)">
+								<div class="thum">
+									<img src="https://cast.kcycle.or.kr/vod/mbr/2026/04/14/2026041401.jpg" onerror="this.src=&#39;/images/common/thum_16_9_b.jpg&#39;" alt="경주동영상 썸네일">
+								</div>
+								<div class="videoPlayback">
+									<button type="button" class="btnPlayIntro" onclick="fnVideo.popup(&#39;race&#39;, &quot;2026&quot;, &quot;16&quot;, &quot;1&quot;, &quot;01&quot;, &#39;I&#39;)">
+										<span>소개항주</span>
+									</button>
+									<button type="button" class="btnPlayRace" onclick="fnVideo.popup(&#39;race&#39;, &quot;2026&quot;, &quot;16&quot;, &quot;1&quot;, &quot;01&quot;, &#39;B&#39;)">
+										<span>경주장면</span>
+									</button>
+								</div>
+								<div class="thumTit">2026년 16회 1일차 01경주(04월 14일)</div>
+								<ul class="bbsDate">
+									<li class="item date">2026.04.14</li>
+								</ul>
+							</a>
+						</div>
+					</div>
+
+					<!-- 페이징 -->
+					
+	
+		<div class="comPaging">
+			<a class="start" href="javascript:void(0)" onclick="fnSearch(1)">첫페이지로 이동</a>
+			<a class="prev" href="javascript:void(0)" onclick="fnSearch(1)">이전페이지로 이동</a>
+			<ul class="numList">
+				
+					<li>
+						<a href="javascript:void(0)" onclick="fnSearch(1)">1</a>
+					</li>
+				
+					<li class="on">
+						<a href="javascript:void(0)">2</a>
+					</li>
+				
+			</ul>
+			<a class="next" href="javascript:void(0)">다음페이지로 이동</a>
+			<a class="end" href="javascript:void(0)">마지막페이지로 이동</a>
+		</div>
+	
+
+					<!-- //페이징 -->
+				</div>
+			</div>
+		</form>
+	</div>

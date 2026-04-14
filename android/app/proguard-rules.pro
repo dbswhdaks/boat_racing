@@ -15,3 +15,6 @@
 -keep class io.supabase.** { *; }
 -keep class com.google.crypto.tink.** { *; }
 -dontwarn com.google.crypto.tink.**
+
+## Google Play Core (deferred components)
+-dontwarn com.google.android.play.core.**
