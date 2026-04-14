@@ -83,7 +83,7 @@ class BoatRacingApiService {
     return items;
   }
 
-  Future<(int, int)?> _getWeekDayForDate(String dateYmd) async {
+  Future<(int, int)?> getWeekDayForDate(String dateYmd) async {
     if (_dateToWeekDay.containsKey(dateYmd)) return _dateToWeekDay[dateYmd];
     final year = int.parse(dateYmd.substring(0, 4));
     await fetchAllRaceDoc(year: year);
@@ -222,7 +222,7 @@ class BoatRacingApiService {
     }
   }
 
-  // ─── 출주표 (RACE_DOC 기반) ───
+  // ─── 출주표 (RACE_DOC 기반 + RACE_INFO 보조) ───
 
   Future<ApiResult<List<RaceEntry>>> fetchRaceEntries({
     required String date,
@@ -230,8 +230,9 @@ class BoatRacingApiService {
   }) async {
     try {
       final year = int.parse(date.substring(0, 4));
-      final allItems = await fetchAllRaceDoc(year: year);
-      final matched = allItems.where((m) {
+
+      final allDocItems = await fetchAllRaceDoc(year: year);
+      final docMatched = allDocItems.where((m) {
         final ymd = m['race_ymd']?.toString() ?? '';
         if (ymd != date) return false;
         if (rcNo != null) {
@@ -241,8 +242,31 @@ class BoatRacingApiService {
         return true;
       }).toList();
 
-      if (matched.isNotEmpty) {
-        return ApiResult.success(_buildEntriesFromItems(matched));
+      if (docMatched.length >= 6) {
+        return ApiResult.success(_buildEntriesFromItems(docMatched));
+      }
+
+      final wd = await getWeekDayForDate(date);
+      if (wd != null) {
+        final allInfoItems = await fetchAllRaceInfo(year: year);
+        final infoMatched = allInfoItems.where((m) {
+          final wt = int.tryParse(m['week_tcnt']?.toString() ?? '') ?? 0;
+          final dt = int.tryParse(m['day_tcnt']?.toString() ?? '') ?? 0;
+          if (wt != wd.$1 || dt != wd.$2) return false;
+          if (rcNo != null) {
+            final rn = int.tryParse(m['race_no']?.toString() ?? '');
+            return rn == rcNo;
+          }
+          return true;
+        }).toList();
+
+        if (infoMatched.length > docMatched.length) {
+          return ApiResult.success(_buildEntriesFromItems(infoMatched));
+        }
+      }
+
+      if (docMatched.isNotEmpty) {
+        return ApiResult.success(_buildEntriesFromItems(docMatched));
       }
       return const ApiResult.success([]);
     } on DioException catch (e) {
@@ -260,7 +284,7 @@ class BoatRacingApiService {
   }) async {
     try {
       final year = int.parse(date.substring(0, 4));
-      final wd = await _getWeekDayForDate(date);
+      final wd = await getWeekDayForDate(date);
       if (wd == null) return const ApiResult.success([]);
 
       final allItems = await _fetchAllRaceResult(year: year);

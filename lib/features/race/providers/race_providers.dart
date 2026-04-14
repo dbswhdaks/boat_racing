@@ -144,12 +144,42 @@ final raceEntriesProvider = FutureProvider.family<DataWithSource<List<RaceEntry>
   ref.keepAlive();
   final api = ref.watch(boatRacingApiProvider);
   final backup = ref.watch(supabaseBackupProvider);
+  final kboat = ref.watch(kboatScraperProvider);
 
   final result = await api.fetchRaceEntries(date: params.date, rcNo: params.raceNo);
-  if (result.isSuccess && result.data != null && result.data!.isNotEmpty) {
-    if (kDebugMode) debugPrint('[Provider] entries(${params.date}, R${params.raceNo}): ${result.data!.length}명');
-    backup.saveEntries(date: params.date, raceNo: params.raceNo, entries: result.data!);
-    return DataWithSource(data: result.data!, fromApi: true);
+  final apiEntries = result.isSuccess ? (result.data ?? <RaceEntry>[]) : <RaceEntry>[];
+
+  if (apiEntries.length >= 6) {
+    if (kDebugMode) debugPrint('[Provider] entries(${params.date}, R${params.raceNo}): ${apiEntries.length}명');
+    backup.saveEntries(date: params.date, raceNo: params.raceNo, entries: apiEntries);
+    return DataWithSource(data: apiEntries, fromApi: true);
+  }
+
+  if (apiEntries.length < 6) {
+    try {
+      final wd = await api.getWeekDayForDate(params.date);
+      if (wd != null) {
+        final kboatEntries = await kboat.fetchRaceEntries(
+          weekTcnt: wd.$1,
+          dayTcnt: wd.$2,
+          raceNo: params.raceNo,
+        );
+        if (kboatEntries.length > apiEntries.length) {
+          if (kDebugMode) {
+            debugPrint('[Provider] entries(${params.date}, R${params.raceNo}): KBOAT ${kboatEntries.length}명');
+          }
+          backup.saveEntries(date: params.date, raceNo: params.raceNo, entries: kboatEntries);
+          return DataWithSource(data: kboatEntries, fromApi: false, apiError: 'KBOAT 웹 기반');
+        }
+      }
+    } catch (e) {
+      if (kDebugMode) debugPrint('[Provider] KBOAT 출주표 실패: $e');
+    }
+  }
+
+  if (apiEntries.isNotEmpty) {
+    backup.saveEntries(date: params.date, raceNo: params.raceNo, entries: apiEntries);
+    return DataWithSource(data: apiEntries, fromApi: true);
   }
 
   final cached = await backup.loadEntries(date: params.date, raceNo: params.raceNo);

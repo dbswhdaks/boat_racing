@@ -4,6 +4,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import '../network/dio_client.dart';
 import '../../models/race.dart';
+import '../../models/race_entry.dart';
 import '../../models/race_result.dart';
 
 class KboatVideoInfo {
@@ -336,10 +337,145 @@ class KboatScraperService {
     return ymd;
   }
 
+  // ─── 출주표 스크래핑 (KBOAT 확정출주표) ───
+
+  static const _cardUrl = 'https://www.kboat.or.kr/race/card/decision';
+  final Map<String, List<RaceEntry>> _entryCache = {};
+
+  Future<List<RaceEntry>> fetchRaceEntries({
+    required int weekTcnt,
+    required int dayTcnt,
+    required int raceNo,
+  }) async {
+    final cacheKey = '$weekTcnt-$dayTcnt-$raceNo';
+    if (_entryCache.containsKey(cacheKey)) return _entryCache[cacheKey]!;
+
+    try {
+      final year = DateTime.now().year;
+      final res = await _dio.post(
+        _cardUrl,
+        data: FormData.fromMap({
+          'stndYear': year.toString(),
+          'tms': weekTcnt.toString(),
+          'dayOrd': dayTcnt.toString(),
+        }),
+        options: Options(headers: {
+          'X-Requested-With': 'XMLHttpRequest',
+          'Accept': 'text/html',
+        }),
+      );
+
+      final html = res.data?.toString() ?? '';
+      if (html.isEmpty) return [];
+
+      final allEntries = _parseRaceCardHtml(html);
+      for (final entry in allEntries.entries) {
+        _entryCache['$weekTcnt-$dayTcnt-${entry.key}'] = entry.value;
+      }
+
+      return _entryCache[cacheKey] ?? [];
+    } catch (e) {
+      if (kDebugMode) debugPrint('[KBOAT] 출주표 스크래핑 실패: $e');
+      return [];
+    }
+  }
+
+  Map<int, List<RaceEntry>> _parseRaceCardHtml(String html) {
+    final result = <int, List<RaceEntry>>{};
+
+    final racePattern = RegExp(
+      r'제\s*(\d+)경주\s*\(출발시간\s*[\d:]+\)',
+    );
+    final raceMatches = racePattern.allMatches(html).toList();
+
+    for (int i = 0; i < raceMatches.length; i++) {
+      final raceNo = int.parse(raceMatches[i].group(1)!);
+      final start = raceMatches[i].start;
+      final end = i + 1 < raceMatches.length
+          ? raceMatches[i + 1].start
+          : html.length;
+      final section = html.substring(start, end);
+
+      final entries = _parseRacerRows(section);
+      if (entries.isNotEmpty) {
+        result[raceNo] = entries;
+      }
+    }
+
+    return result;
+  }
+
+  static final _coursePattern = RegExp(
+    r'<span\s+class="sign\s+num\d+">(\d+)</span>',
+  );
+
+  static final _namePattern = RegExp(
+    r'''fnRacer\.popup\((?:&#39;|')([^'&]+)(?:&#39;|')\s*,\s*(?:&#39;|')[^'&]*(?:&#39;|')\)\s*">\s*([^<]+)</a>''',
+  );
+
+  static final _infoPattern = RegExp(
+    r'<div\s+class="other">\s*(\d+)기/([\w\d]+)/(\d+)세',
+  );
+
+  static final _weightPattern = RegExp(
+    r'</th>\s*<td>(\d+)</td>',
+    dotAll: true,
+  );
+
+  List<RaceEntry> _parseRacerRows(String section) {
+    final entries = <RaceEntry>[];
+
+    final tbodyStart = section.indexOf('<tbody>');
+    final tbodyEnd = section.indexOf('</tbody>');
+    if (tbodyStart < 0 || tbodyEnd < 0) return entries;
+    final tbody = section.substring(tbodyStart, tbodyEnd);
+
+    final rows = tbody.split(RegExp(r'<tr\b'));
+
+    for (final row in rows) {
+      if (row.trim().isEmpty) continue;
+
+      final courseMatch = _coursePattern.firstMatch(row);
+      if (courseMatch == null) continue;
+      final courseNo = int.parse(courseMatch.group(1)!);
+
+      final nameMatch = _namePattern.firstMatch(row);
+      if (nameMatch == null) continue;
+
+      final racerId = nameMatch.group(1)!.trim();
+      final name = nameMatch.group(2)!.trim();
+
+      String grade = '';
+      double? weight;
+
+      final infoMatch = _infoPattern.firstMatch(row);
+      if (infoMatch != null) {
+        grade = infoMatch.group(2)!.trim();
+      }
+
+      final weightMatch = _weightPattern.firstMatch(row);
+      if (weightMatch != null) {
+        weight = double.tryParse(weightMatch.group(1) ?? '');
+      }
+
+      entries.add(RaceEntry(
+        courseNo: courseNo,
+        racerName: name,
+        racerId: racerId,
+        grade: grade,
+        weight: weight,
+      ));
+    }
+
+    entries.sort((a, b) => a.courseNo.compareTo(b.courseNo));
+    return entries;
+  }
+
   void invalidateCache() {
     _cache.clear();
     _monthDatesCache.clear();
     _resultCache = null;
     _resultCacheDate = null;
+    _entryCache.clear();
   }
 }
