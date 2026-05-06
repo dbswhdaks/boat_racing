@@ -2,9 +2,11 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../../../core/widgets/shimmer_loading.dart';
+import '../../../features/admin/providers/admin_auth_provider.dart';
 import '../../../features/race/providers/race_providers.dart';
 import '../../../models/race.dart';
 import '../widgets/month_calendar_sheet.dart';
@@ -77,10 +79,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
   void _refreshNow() {
     final selected = ref.read(selectedDateProvider);
-    ref.read(boatRacingApiProvider).invalidateCache(year: selected.year);
-    ref.read(kboatScraperProvider).invalidateCache();
     final ymd = dateToYmd(selected);
-    ref.read(supabaseBackupProvider).clearCacheForDate(ymd);
+    ref.read(kboatScraperProvider).invalidateResultCache();
     ref.invalidate(raceListProvider((date: ymd)));
     ref.read(_lastRefreshProvider.notifier).state = DateTime.now();
   }
@@ -99,10 +99,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
   String _formatTime(DateTime? t) {
     if (t == null) return '—';
-    final h = t.hour.toString().padLeft(2, '0');
-    final m = t.minute.toString().padLeft(2, '0');
-    final s = t.second.toString().padLeft(2, '0');
-    return '$h:$m:$s';
+    final diff = DateTime.now().difference(t);
+    if (diff.inSeconds < 5) return '방금 업데이트됨';
+    if (diff.inSeconds < 60) return '${diff.inSeconds}초 전 업데이트';
+    if (diff.inMinutes < 60) return '${diff.inMinutes}분 전 업데이트';
+    return '${diff.inHours}시간 전 업데이트';
   }
 
   Future<void> _openCalendar() async {
@@ -143,6 +144,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
     return Scaffold(
       backgroundColor: _kBg,
+      endDrawer: const _HomeDrawer(),
       appBar: AppBar(
         backgroundColor: _kCard,
         foregroundColor: Colors.white,
@@ -172,6 +174,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
             tooltip: '공유',
             icon: const Icon(Icons.share_rounded),
             onPressed: _shareApp,
+          ),
+          Builder(
+            builder: (context) => IconButton(
+              tooltip: '메뉴',
+              icon: const Icon(Icons.menu_rounded),
+              onPressed: () => Scaffold.of(context).openEndDrawer(),
+            ),
           ),
         ],
       ),
@@ -347,7 +356,7 @@ class _UpdateMetaRow extends StatelessWidget {
         children: [
           Expanded(
             child: Text(
-              '갱신: ${formatTime(lastRefresh)}',
+              formatTime(lastRefresh),
               style: const TextStyle(color: Colors.white70, fontSize: 12),
             ),
           ),
@@ -395,37 +404,6 @@ class _HomeEmpty extends StatelessWidget {
               textAlign: TextAlign.center,
               style: TextStyle(color: Colors.white70, fontSize: 16),
             ),
-            if (autoRefreshEnabled) ...[
-              const SizedBox(height: 10),
-              Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  SizedBox(
-                    width: 12,
-                    height: 12,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 1.5,
-                      color: _kGold.withValues(alpha: 0.7),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    '30초마다 새 데이터 자동 확인 중',
-                    style: TextStyle(
-                      color: _kGold.withValues(alpha: 0.7),
-                      fontSize: 12,
-                    ),
-                  ),
-                ],
-              ),
-            ],
-            const SizedBox(height: 20),
-            FilledButton.icon(
-              onPressed: onRefresh,
-              style: FilledButton.styleFrom(backgroundColor: _kPrimary),
-              icon: const Icon(Icons.refresh),
-              label: const Text('다시 불러오기'),
-            ),
           ],
         ),
       ),
@@ -467,6 +445,180 @@ class _HomeError extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+class _HomeDrawer extends ConsumerWidget {
+  const _HomeDrawer();
+
+  void _go(BuildContext context, String location) {
+    Navigator.of(context).pop();
+    context.push(location);
+  }
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final isAdmin = ref.watch(adminAuthProvider);
+
+    return Drawer(
+      backgroundColor: _kCard,
+      child: SafeArea(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Container(
+              padding: const EdgeInsets.fromLTRB(20, 24, 20, 20),
+              decoration: const BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    Color(0xFF0D47A1),
+                    Color(0xFF1565C0),
+                    Color(0xFF0097A7),
+                  ],
+                ),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(8),
+                        child: Image.asset(
+                          'assets/images/app_logo.png',
+                          width: 36,
+                          height: 36,
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      const Text(
+                        '경정 Plus',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 18,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  Text(
+                    '미사리경정공원 경주 정보·예측',
+                    style: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.85),
+                      fontSize: 12,
+                    ),
+                  ),
+                  if (isAdmin) ...[
+                    const SizedBox(height: 12),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 5,
+                      ),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF22C55E).withValues(alpha: 0.2),
+                        borderRadius: BorderRadius.circular(999),
+                        border: Border.all(
+                          color: const Color(0xFF22C55E)
+                              .withValues(alpha: 0.5),
+                        ),
+                      ),
+                      child: const Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.verified_user_rounded,
+                            size: 12,
+                            color: Color(0xFF22C55E),
+                          ),
+                          SizedBox(width: 4),
+                          Text(
+                            '관리자 모드',
+                            style: TextStyle(
+                              color: Color(0xFF22C55E),
+                              fontSize: 11,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            const SizedBox(height: 8),
+            _DrawerItem(
+              icon: Icons.workspace_premium_rounded,
+              iconColor: _kGold,
+              label: '구독하기',
+              onTap: () => _go(context, '/subscription'),
+            ),
+            _DrawerItem(
+              icon: Icons.shield_outlined,
+              iconColor: const Color(0xFF22C55E),
+              label: '관리자 페이지',
+              trailing: isAdmin
+                  ? const Icon(
+                      Icons.check_circle_rounded,
+                      size: 18,
+                      color: Color(0xFF22C55E),
+                    )
+                  : null,
+              onTap: () => _go(context, '/admin'),
+            ),
+            const Spacer(),
+            const Divider(color: Color(0xFF30363D), height: 1),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
+              child: Text(
+                '경정 Plus',
+                style: TextStyle(
+                  color: Colors.grey.shade500,
+                  fontSize: 11,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _DrawerItem extends StatelessWidget {
+  const _DrawerItem({
+    required this.icon,
+    required this.iconColor,
+    required this.label,
+    required this.onTap,
+    this.trailing,
+  });
+
+  final IconData icon;
+  final Color iconColor;
+  final String label;
+  final VoidCallback onTap;
+  final Widget? trailing;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListTile(
+      leading: Icon(icon, color: iconColor, size: 22),
+      title: Text(
+        label,
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 14,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+      trailing: trailing,
+      onTap: onTap,
     );
   }
 }

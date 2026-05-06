@@ -2,7 +2,7 @@ name: boat_racing
 description: "경정 Plus - 경정 경주 정보, 출주표, 배당률, AI 예측을 제공하는 앱"
 publish_to: 'none'
 
-version: 1.0.0+1
+version: 1.0.5+5
 
 environment:
   sdk: ^3.9.0
@@ -21,6 +21,7 @@ dependencies:
   shared_preferences: ^2.5.4
   supabase_flutter: ^2.12.0
   url_launcher: ^6.3.2
+  in_app_purchase: ^3.2.3
 
 dev_dependencies:
   flutter_test:

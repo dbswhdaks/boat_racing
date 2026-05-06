@@ -1,9 +1,12 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../../core/constants/iap_constants.dart';
 import '../../../core/services/boat_racing_api_service.dart';
 import '../../../core/services/kboat_scraper_service.dart';
 import '../../../core/services/prediction_engine.dart';
 import '../../../core/services/supabase_backup_service.dart';
+import '../../../features/admin/providers/admin_auth_provider.dart';
+import '../../../features/subscription/providers/in_app_purchase_provider.dart';
 import '../../../models/race.dart';
 import '../../../models/race_entry.dart';
 import '../../../models/race_result.dart';
@@ -30,11 +33,28 @@ final selectedDateProvider = StateProvider<DateTime>((ref) {
   return DateTime(now.year, now.month, now.day);
 });
 
+/// 구독 활성 여부 — 다음 중 하나라도 참이면 모든 잠금이 해제된다.
+/// 1) 관리자 로그인 상태(adminAuthProvider == true)
+/// 2) Google Play 인앱결제 보유 productId 중 하나가
+///    [IapConstants.subscriptionProductIds]에 포함.
+final isSubscribedProvider = Provider<bool>((ref) {
+  final isAdmin = ref.watch(adminAuthProvider);
+  if (isAdmin) return true;
+  final iapState = ref.watch(inAppPurchaseProvider);
+  return iapState.purchasedProductIds.any(
+    IapConstants.subscriptionProductIds.contains,
+  );
+});
+
 class DataWithSource<T> {
   final T data;
   final bool fromApi;
   final String? apiError;
-  const DataWithSource({required this.data, this.fromApi = false, this.apiError});
+  const DataWithSource({
+    required this.data,
+    this.fromApi = false,
+    this.apiError,
+  });
 }
 
 String dateToYmd(DateTime d) {
@@ -43,7 +63,6 @@ String dateToYmd(DateTime d) {
 
 String get todayYmd => dateToYmd(DateTime.now());
 
-
 /// API 연결 상태
 final apiStatusProvider = FutureProvider<ApiResult<String>>((ref) async {
   final api = ref.watch(boatRacingApiProvider);
@@ -51,153 +70,216 @@ final apiStatusProvider = FutureProvider<ApiResult<String>>((ref) async {
 });
 
 /// 월별 경기 날짜
-final monthRaceDatesProvider = FutureProvider.family<
-    Set<String>,
-    ({int year, int month})>((ref, params) async {
-  final link = ref.keepAlive();
-  final api = ref.watch(boatRacingApiProvider);
-  final backup = ref.watch(supabaseBackupProvider);
-  final kboat = ref.watch(kboatScraperProvider);
+final monthRaceDatesProvider =
+    FutureProvider.family<Set<String>, ({int year, int month})>((
+      ref,
+      params,
+    ) async {
+      final link = ref.keepAlive();
+      final api = ref.watch(boatRacingApiProvider);
+      final backup = ref.watch(supabaseBackupProvider);
+      final kboat = ref.watch(kboatScraperProvider);
 
-  final dates = <String>{};
+      final dates = <String>{};
 
-  final result = await api.fetchRaceDatesForMonth(year: params.year, month: params.month);
-  if (result.isSuccess && result.data != null && result.data!.isNotEmpty) {
-    dates.addAll(result.data!);
-  }
+      final results = await Future.wait([
+        api.fetchRaceDatesForMonth(year: params.year, month: params.month),
+        kboat
+            .fetchRaceDatesForMonth(year: params.year, month: params.month)
+            .catchError((_) => <String>{}),
+      ]);
 
-  try {
-    final kboatDates = await kboat.fetchRaceDatesForMonth(
-      year: params.year,
-      month: params.month,
-    );
-    if (kboatDates.isNotEmpty) {
-      dates.addAll(kboatDates);
-      if (kDebugMode) debugPrint('[Provider] monthRaceDates: KBOAT ${kboatDates.length}일 병합');
-    }
-  } catch (e) {
-    if (kDebugMode) debugPrint('[Provider] monthRaceDates KBOAT 실패: $e');
-  }
+      final apiResult = results[0] as ApiResult<Set<String>>;
+      final kboatDates = results[1] as Set<String>;
 
-  if (dates.isNotEmpty) return dates;
+      if (apiResult.isSuccess && apiResult.data != null) {
+        dates.addAll(apiResult.data!);
+      }
+      if (kboatDates.isNotEmpty) {
+        dates.addAll(kboatDates);
+      }
 
-  final cached = await backup.loadRaceDatesForMonth(
-    year: params.year,
-    month: params.month,
-  );
-  if (cached.isNotEmpty) {
-    if (kDebugMode) debugPrint('[Provider] monthRaceDates: Supabase 캐시 ${cached.length}일');
-    return cached;
-  }
+      if (dates.isNotEmpty) return dates;
 
-  link.close();
-  return {};
-});
+      final cached = await backup.loadRaceDatesForMonth(
+        year: params.year,
+        month: params.month,
+      );
+      if (cached.isNotEmpty) return cached;
+
+      link.close();
+      return {};
+    });
 
 /// 경주 목록
 final raceListProvider =
-    FutureProvider.family<DataWithSource<List<Race>>, ({String date})>(
-        (ref, params) async {
-  final link = ref.keepAlive();
-  final api = ref.watch(boatRacingApiProvider);
-  final backup = ref.watch(supabaseBackupProvider);
-  final kboat = ref.watch(kboatScraperProvider);
+    FutureProvider.family<DataWithSource<List<Race>>, ({String date})>((
+      ref,
+      params,
+    ) async {
+      final link = ref.keepAlive();
+      final api = ref.watch(boatRacingApiProvider);
+      final backup = ref.watch(supabaseBackupProvider);
+      final kboat = ref.watch(kboatScraperProvider);
 
-  final result = await api.fetchRaceList(date: params.date);
+      final apiResult = await api.fetchRaceList(date: params.date);
 
-  if (result.isSuccess && result.data != null && result.data!.isNotEmpty) {
-    if (kDebugMode) debugPrint('[Provider] raceList(${params.date}): API ${result.data!.length}건');
-    backup.saveRaces(result.data!);
-    api.preWarmPayoffCache(year: int.parse(params.date.substring(0, 4)));
-    return DataWithSource(data: result.data!, fromApi: true);
-  }
+      if (apiResult.isSuccess &&
+          apiResult.data != null &&
+          apiResult.data!.isNotEmpty) {
+        if (kDebugMode) {
+          debugPrint(
+            '[Provider] raceList(${params.date}): API ${apiResult.data!.length}건',
+          );
+        }
+        backup.saveRaces(apiResult.data!);
+        api.preWarmPayoffCache(year: int.parse(params.date.substring(0, 4)));
+        return DataWithSource(data: apiResult.data!, fromApi: true);
+      }
 
-  final cached = await backup.loadRaces(date: params.date);
-  if (cached.isNotEmpty) {
-    if (kDebugMode) debugPrint('[Provider] raceList(${params.date}): Supabase 캐시 ${cached.length}건');
-    return DataWithSource(data: cached, fromApi: false, apiError: result.errorMessage);
-  }
+      final kboatRaces = await kboat
+          .fetchRaceList(date: params.date)
+          .catchError((_) => <Race>[]);
 
-  try {
-    final kboatRaces = await kboat.fetchRaceList(date: params.date);
-    if (kboatRaces.isNotEmpty) {
-      if (kDebugMode) debugPrint('[Provider] raceList(${params.date}): KBOAT ${kboatRaces.length}건');
-      backup.saveRaces(kboatRaces);
-      return DataWithSource(data: kboatRaces, fromApi: false, apiError: 'KBOAT 영상 기반');
-    }
-  } catch (e) {
-    if (kDebugMode) debugPrint('[Provider] raceList KBOAT 실패: $e');
-  }
+      if (kboatRaces.isNotEmpty) {
+        if (kDebugMode) {
+          debugPrint(
+            '[Provider] raceList(${params.date}): KBOAT ${kboatRaces.length}건',
+          );
+        }
+        backup.saveRaces(kboatRaces);
+        return DataWithSource(
+          data: kboatRaces,
+          fromApi: false,
+          apiError: 'KBOAT 영상 기반',
+        );
+      }
 
-  link.close();
-  if (kDebugMode) debugPrint('[Provider] raceList(${params.date}): 데이터 없음 → keepAlive 해제');
-  return DataWithSource(
-    data: [],
-    fromApi: true,
-    apiError: result.errorMessage,
-  );
-});
+      final cached = await backup.loadRaces(date: params.date);
+      if (cached.isNotEmpty) {
+        if (kDebugMode) {
+          debugPrint(
+            '[Provider] raceList(${params.date}): Supabase 캐시 ${cached.length}건',
+          );
+        }
+        return DataWithSource(
+          data: cached,
+          fromApi: false,
+          apiError: apiResult.errorMessage,
+        );
+      }
+
+      link.close();
+      return DataWithSource(
+        data: [],
+        fromApi: true,
+        apiError: apiResult.errorMessage,
+      );
+    });
 
 /// 출주표
-final raceEntriesProvider = FutureProvider.family<DataWithSource<List<RaceEntry>>,
-    ({String date, int raceNo})>((ref, params) async {
-  ref.keepAlive();
-  final api = ref.watch(boatRacingApiProvider);
-  final backup = ref.watch(supabaseBackupProvider);
-  final kboat = ref.watch(kboatScraperProvider);
+final raceEntriesProvider =
+    FutureProvider.family<
+      DataWithSource<List<RaceEntry>>,
+      ({String date, int raceNo})
+    >((ref, params) async {
+      ref.keepAlive();
+      final api = ref.watch(boatRacingApiProvider);
+      final backup = ref.watch(supabaseBackupProvider);
+      final kboat = ref.watch(kboatScraperProvider);
 
-  final result = await api.fetchRaceEntries(date: params.date, rcNo: params.raceNo);
-  final apiEntries = result.isSuccess ? (result.data ?? <RaceEntry>[]) : <RaceEntry>[];
+      final result = await api.fetchRaceEntries(
+        date: params.date,
+        rcNo: params.raceNo,
+      );
+      final apiEntries = result.isSuccess
+          ? (result.data ?? <RaceEntry>[])
+          : <RaceEntry>[];
 
-  if (apiEntries.length >= 6) {
-    if (kDebugMode) debugPrint('[Provider] entries(${params.date}, R${params.raceNo}): ${apiEntries.length}명');
-    backup.saveEntries(date: params.date, raceNo: params.raceNo, entries: apiEntries);
-    return DataWithSource(data: apiEntries, fromApi: true);
-  }
-
-  if (apiEntries.length < 6) {
-    try {
-      final wd = await api.getWeekDayForDate(params.date);
-      if (wd != null) {
-        final kboatEntries = await kboat.fetchRaceEntries(
-          weekTcnt: wd.$1,
-          dayTcnt: wd.$2,
+      if (apiEntries.length >= 6) {
+        if (kDebugMode) {
+          debugPrint(
+            '[Provider] entries(${params.date}, R${params.raceNo}): ${apiEntries.length}명',
+          );
+        }
+        backup.saveEntries(
+          date: params.date,
           raceNo: params.raceNo,
+          entries: apiEntries,
         );
-        if (kboatEntries.length > apiEntries.length) {
-          if (kDebugMode) {
-            debugPrint('[Provider] entries(${params.date}, R${params.raceNo}): KBOAT ${kboatEntries.length}명');
+        return DataWithSource(data: apiEntries, fromApi: true);
+      }
+
+      if (apiEntries.length < 6) {
+        try {
+          final wd = await api.getWeekDayForDate(params.date);
+          if (wd != null) {
+            final kboatEntries = await kboat.fetchRaceEntries(
+              weekTcnt: wd.$1,
+              dayTcnt: wd.$2,
+              raceNo: params.raceNo,
+            );
+            if (kboatEntries.length > apiEntries.length) {
+              if (kDebugMode) {
+                debugPrint(
+                  '[Provider] entries(${params.date}, R${params.raceNo}): KBOAT ${kboatEntries.length}명',
+                );
+              }
+              backup.saveEntries(
+                date: params.date,
+                raceNo: params.raceNo,
+                entries: kboatEntries,
+              );
+              return DataWithSource(
+                data: kboatEntries,
+                fromApi: false,
+                apiError: 'KBOAT 웹 기반',
+              );
+            }
           }
-          backup.saveEntries(date: params.date, raceNo: params.raceNo, entries: kboatEntries);
-          return DataWithSource(data: kboatEntries, fromApi: false, apiError: 'KBOAT 웹 기반');
+        } catch (e) {
+          if (kDebugMode) debugPrint('[Provider] KBOAT 출주표 실패: $e');
         }
       }
-    } catch (e) {
-      if (kDebugMode) debugPrint('[Provider] KBOAT 출주표 실패: $e');
-    }
-  }
 
-  if (apiEntries.isNotEmpty) {
-    backup.saveEntries(date: params.date, raceNo: params.raceNo, entries: apiEntries);
-    return DataWithSource(data: apiEntries, fromApi: true);
-  }
+      if (apiEntries.isNotEmpty) {
+        backup.saveEntries(
+          date: params.date,
+          raceNo: params.raceNo,
+          entries: apiEntries,
+        );
+        return DataWithSource(data: apiEntries, fromApi: true);
+      }
 
-  final cached = await backup.loadEntries(date: params.date, raceNo: params.raceNo);
-  if (cached.isNotEmpty) {
-    if (kDebugMode) debugPrint('[Provider] entries(${params.date}, R${params.raceNo}): Supabase 캐시 ${cached.length}명');
-    return DataWithSource(data: cached, fromApi: false, apiError: result.errorMessage);
-  }
+      final cached = await backup.loadEntries(
+        date: params.date,
+        raceNo: params.raceNo,
+      );
+      if (cached.isNotEmpty) {
+        if (kDebugMode) {
+          debugPrint(
+            '[Provider] entries(${params.date}, R${params.raceNo}): Supabase 캐시 ${cached.length}명',
+          );
+        }
+        return DataWithSource(
+          data: cached,
+          fromApi: false,
+          apiError: result.errorMessage,
+        );
+      }
 
-  return DataWithSource(
-    data: <RaceEntry>[],
-    fromApi: true,
-    apiError: result.errorMessage,
-  );
-});
+      return DataWithSource(
+        data: <RaceEntry>[],
+        fromApi: true,
+        apiError: result.errorMessage,
+      );
+    });
 
 /// 배당률
-final oddsProvider = FutureProvider.family<Odds, ({String date, int raceNo})>(
-    (ref, params) async {
+final oddsProvider = FutureProvider.family<Odds, ({String date, int raceNo})>((
+  ref,
+  params,
+) async {
   ref.keepAlive();
   final api = ref.watch(boatRacingApiProvider);
   final result = await api.fetchPayoff(date: params.date, rcNo: params.raceNo);
@@ -206,115 +288,137 @@ final oddsProvider = FutureProvider.family<Odds, ({String date, int raceNo})>(
 });
 
 /// 경주 결과
-final raceResultProvider = FutureProvider.family<RaceResult,
-    ({String date, int raceNo})>((ref, params) async {
-  final api = ref.watch(boatRacingApiProvider);
-  final kboat = ref.watch(kboatScraperProvider);
+final raceResultProvider =
+    FutureProvider.family<RaceResult, ({String date, int raceNo})>((
+      ref,
+      params,
+    ) async {
+      final api = ref.watch(boatRacingApiProvider);
+      final kboat = ref.watch(kboatScraperProvider);
 
-  // KBOAT 우선 (정확한 착순 + 배당률 7종 제공)
-  if (params.date == todayYmd) {
-    try {
-      final bundle = await kboat.fetchTodayResults();
-      if (bundle != null && bundle.results.containsKey(params.raceNo)) {
-        if (kDebugMode) {
-          debugPrint('[Provider] raceResult(R${params.raceNo}): KBOAT 사용');
+      // KBOAT 우선 (정확한 착순 + 배당률 7종 제공)
+      if (params.date == todayYmd) {
+        try {
+          final bundle = await kboat.fetchTodayResults();
+          if (bundle != null && bundle.results.containsKey(params.raceNo)) {
+            if (kDebugMode) {
+              debugPrint('[Provider] raceResult(R${params.raceNo}): KBOAT 사용');
+            }
+            return bundle.results[params.raceNo]!;
+          }
+        } catch (e) {
+          if (kDebugMode) debugPrint('[Provider] raceResult KBOAT 실패: $e');
         }
-        return bundle.results[params.raceNo]!;
       }
-    } catch (e) {
-      if (kDebugMode) debugPrint('[Provider] raceResult KBOAT 실패: $e');
-    }
-  }
 
-  // 공공 API fallback
-  final result = await api.fetchRaceResult(date: params.date, rcNo: params.raceNo);
-  if (result.isSuccess && result.data != null && result.data!.isNotEmpty) {
-    return result.data!.first;
-  }
+      // 공공 API fallback
+      final result = await api.fetchRaceResult(
+        date: params.date,
+        rcNo: params.raceNo,
+      );
+      if (result.isSuccess && result.data != null && result.data!.isNotEmpty) {
+        return result.data!.first;
+      }
 
-  throw Exception('NOT_YET');
-});
+      throw Exception('NOT_YET');
+    });
 
 /// 경주 순위
-final raceRankProvider = FutureProvider.family<List<Map<String, dynamic>>,
-    ({String date, int raceNo})>((ref, params) async {
-  final api = ref.watch(boatRacingApiProvider);
-  final kboat = ref.watch(kboatScraperProvider);
+final raceRankProvider =
+    FutureProvider.family<
+      List<Map<String, dynamic>>,
+      ({String date, int raceNo})
+    >((ref, params) async {
+      final api = ref.watch(boatRacingApiProvider);
+      final kboat = ref.watch(kboatScraperProvider);
 
-  List<Map<String, dynamic>> top3 = [];
+      List<Map<String, dynamic>> top3 = [];
 
-  // KBOAT 착순 (1~3위)
-  if (params.date == todayYmd) {
-    try {
-      final bundle = await kboat.fetchTodayResults();
-      if (bundle != null && bundle.ranks.containsKey(params.raceNo)) {
-        top3 = bundle.ranks[params.raceNo]!;
+      // KBOAT 착순 (1~3위)
+      if (params.date == todayYmd) {
+        try {
+          final bundle = await kboat.fetchTodayResults();
+          if (bundle != null && bundle.ranks.containsKey(params.raceNo)) {
+            top3 = bundle.ranks[params.raceNo]!;
+          }
+        } catch (e) {
+          if (kDebugMode) debugPrint('[Provider] raceRank KBOAT 실패: $e');
+        }
       }
-    } catch (e) {
-      if (kDebugMode) debugPrint('[Provider] raceRank KBOAT 실패: $e');
-    }
-  }
 
-  // 공공 API (race_rank 필드가 있으면 그대로 사용)
-  if (top3.isEmpty) {
-    final result = await api.fetchRaceRank(date: params.date, rcNo: params.raceNo);
-    if (result.isSuccess && result.data != null && result.data!.isNotEmpty) {
-      final hasRank = result.data!.any((m) =>
-          m['race_rank'] != null || m['rank'] != null);
-      if (hasRank) return result.data!;
-    }
-  }
-
-  if (top3.isEmpty) throw Exception('NOT_YET');
-
-  // 출주표에서 나머지 선수 보충 → 전체 착순 표시
-  try {
-    final entriesResult = await ref.watch(raceEntriesProvider((
-      date: params.date, raceNo: params.raceNo,
-    )).future);
-    final entries = entriesResult.data;
-    if (entries.isNotEmpty) {
-      final rankedCourses = top3.map((r) => r['course_no'] as int).toSet();
-      final remaining = entries
-          .where((e) => !rankedCourses.contains(e.courseNo))
-          .toList()
-        ..sort((a, b) => a.courseNo.compareTo(b.courseNo));
-
-      int nextRank = top3.length + 1;
-      for (final e in remaining) {
-        top3.add({
-          'rank': nextRank,
-          'race_rank': nextRank,
-          'course_no': e.courseNo,
-          'racer_nm': e.racerName,
-        });
-        nextRank++;
+      // 공공 API (race_rank 필드가 있으면 그대로 사용)
+      if (top3.isEmpty) {
+        final result = await api.fetchRaceRank(
+          date: params.date,
+          rcNo: params.raceNo,
+        );
+        if (result.isSuccess &&
+            result.data != null &&
+            result.data!.isNotEmpty) {
+          final hasRank = result.data!.any(
+            (m) => m['race_rank'] != null || m['rank'] != null,
+          );
+          if (hasRank) return result.data!;
+        }
       }
-    }
-  } catch (_) {}
 
-  if (kDebugMode) {
-    debugPrint('[Provider] raceRank(R${params.raceNo}): ${top3.length}명 (KBOAT+출주표)');
-  }
-  return top3;
-});
+      if (top3.isEmpty) throw Exception('NOT_YET');
+
+      // 출주표에서 나머지 선수 보충 → 전체 착순 표시
+      try {
+        final entriesResult = await ref.watch(
+          raceEntriesProvider((
+            date: params.date,
+            raceNo: params.raceNo,
+          )).future,
+        );
+        final entries = entriesResult.data;
+        if (entries.isNotEmpty) {
+          final rankedCourses = top3.map((r) => r['course_no'] as int).toSet();
+          final remaining =
+              entries.where((e) => !rankedCourses.contains(e.courseNo)).toList()
+                ..sort((a, b) => a.courseNo.compareTo(b.courseNo));
+
+          int nextRank = top3.length + 1;
+          for (final e in remaining) {
+            top3.add({
+              'rank': nextRank,
+              'race_rank': nextRank,
+              'course_no': e.courseNo,
+              'racer_nm': e.racerName,
+            });
+            nextRank++;
+          }
+        }
+      } catch (_) {}
+
+      if (kDebugMode) {
+        debugPrint(
+          '[Provider] raceRank(R${params.raceNo}): ${top3.length}명 (KBOAT+출주표)',
+        );
+      }
+      return top3;
+    });
 
 /// AI 예측
-final predictionProvider = FutureProvider.family<RacePrediction,
-    ({String date, int raceNo})>((ref, params) async {
-  final backup = ref.watch(supabaseBackupProvider);
-  final entriesResult = await ref.watch(raceEntriesProvider((
-    date: params.date, raceNo: params.raceNo,
-  )).future);
+final predictionProvider =
+    FutureProvider.family<RacePrediction, ({String date, int raceNo})>((
+      ref,
+      params,
+    ) async {
+      final backup = ref.watch(supabaseBackupProvider);
+      final entriesResult = await ref.watch(
+        raceEntriesProvider((date: params.date, raceNo: params.raceNo)).future,
+      );
 
-  final prediction = PredictionEngine.predict(entriesResult.data);
-  backup.savePrediction(
-    date: params.date,
-    raceNo: params.raceNo,
-    prediction: prediction,
-  );
-  return prediction;
-});
+      final prediction = PredictionEngine.predict(entriesResult.data);
+      backup.savePrediction(
+        date: params.date,
+        raceNo: params.raceNo,
+        prediction: prediction,
+      );
+      return prediction;
+    });
 
 Future<RacerDetail> _enrichRacerDetail(
   BoatRacingApiService api,
@@ -358,12 +462,14 @@ Future<RacerDetail> _enrichRacerDetail(
     for (final m in cwResult.data!) {
       final cnt = parseIntVal(m['cnt']) ?? 0;
       if (cnt <= 0) continue;
-      strategies.add(CourseStrategy(
-        course: m['entry_course']?.toString() ?? '',
-        strategy: m['strategy_cd']?.toString() ?? '',
-        count: cnt,
-        rate: parseDoubleVal(m['rate']) ?? 0,
-      ));
+      strategies.add(
+        CourseStrategy(
+          course: m['entry_course']?.toString() ?? '',
+          strategy: m['strategy_cd']?.toString() ?? '',
+          count: cnt,
+          rate: parseDoubleVal(m['rate']) ?? 0,
+        ),
+      );
     }
     strategies.sort((a, b) => b.count.compareTo(a.count));
   }
@@ -381,44 +487,49 @@ Future<RacerDetail> _enrichRacerDetail(
 
 /// 선수 상세
 final racerDetailProvider =
-    FutureProvider.family<RacerDetail, ({RaceEntry entry})>(
-        (ref, params) async {
-  final api = ref.watch(boatRacingApiProvider);
-  final result = await api.fetchRacerInfo(racerName: params.entry.racerName);
-  RacerDetail base;
-  if (result.isSuccess && result.data != null) {
-    if (kDebugMode) {
-      debugPrint('[Provider] racerDetail(${params.entry.racerName}): API 성공');
-    }
-    base = RacerDetail.fromApiMap(result.data!, entry: params.entry);
-  } else {
-    if (kDebugMode) {
-      debugPrint(
-        '[Provider] racerDetail(${params.entry.racerName}): 목업 (${result.errorMessage})',
+    FutureProvider.family<RacerDetail, ({RaceEntry entry})>((
+      ref,
+      params,
+    ) async {
+      final api = ref.watch(boatRacingApiProvider);
+      final result = await api.fetchRacerInfo(
+        racerName: params.entry.racerName,
       );
-    }
-    return RacerDetail.fromRaceEntryDetailed(params.entry);
-  }
-  return _enrichRacerDetail(api, base);
-});
+      RacerDetail base;
+      if (result.isSuccess && result.data != null) {
+        if (kDebugMode) {
+          debugPrint(
+            '[Provider] racerDetail(${params.entry.racerName}): API 성공',
+          );
+        }
+        base = RacerDetail.fromApiMap(result.data!, entry: params.entry);
+      } else {
+        if (kDebugMode) {
+          debugPrint(
+            '[Provider] racerDetail(${params.entry.racerName}): 목업 (${result.errorMessage})',
+          );
+        }
+        return RacerDetail.fromRaceEntryDetailed(params.entry);
+      }
+      return _enrichRacerDetail(api, base);
+    });
 
 /// 선수 상세 (ID 기반)
 final racerDetailByIdProvider =
-    FutureProvider.family<RacerDetail, ({String racerId})>(
-        (ref, params) async {
-  final api = ref.watch(boatRacingApiProvider);
-  final result = await api.fetchRacerInfo(racerName: params.racerId);
-  if (result.isSuccess && result.data != null) {
-    if (kDebugMode) {
-      debugPrint('[Provider] racerDetailById(${params.racerId}): API 성공');
-    }
-    final base = RacerDetail.fromApiMap(result.data!);
-    return _enrichRacerDetail(api, base);
-  }
-  return RacerDetail(
-    racerId: params.racerId,
-    racerName: params.racerId,
-    grade: '-',
-    avgScore: 0,
-  );
-});
+    FutureProvider.family<RacerDetail, ({String racerId})>((ref, params) async {
+      final api = ref.watch(boatRacingApiProvider);
+      final result = await api.fetchRacerInfo(racerName: params.racerId);
+      if (result.isSuccess && result.data != null) {
+        if (kDebugMode) {
+          debugPrint('[Provider] racerDetailById(${params.racerId}): API 성공');
+        }
+        final base = RacerDetail.fromApiMap(result.data!);
+        return _enrichRacerDetail(api, base);
+      }
+      return RacerDetail(
+        racerId: params.racerId,
+        racerName: params.racerId,
+        grade: '-',
+        avgScore: 0,
+      );
+    });

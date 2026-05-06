@@ -198,16 +198,22 @@ class KboatScraperService {
     }).toList();
   }
 
+  Future<KboatRaceResultBundle?>? _resultInFlight;
+
   /// KBOAT 메인페이지 경주결과 API (당일 결과만 제공)
-  Future<KboatRaceResultBundle?> fetchTodayResults() async {
+  Future<KboatRaceResultBundle?> fetchTodayResults() {
     final now = DateTime.now();
     final todayYmd =
         '${now.year}${now.month.toString().padLeft(2, '0')}${now.day.toString().padLeft(2, '0')}';
 
     if (_resultCacheDate == todayYmd && _resultCache != null) {
-      return _resultCache;
+      return Future.value(_resultCache);
     }
 
+    return _resultInFlight ??= _fetchTodayResultsImpl(todayYmd);
+  }
+
+  Future<KboatRaceResultBundle?> _fetchTodayResultsImpl(String todayYmd) async {
     try {
       final res = await _dio.get(
         _resultUrl,
@@ -293,6 +299,8 @@ class KboatScraperService {
     } catch (e) {
       if (kDebugMode) debugPrint('[KBOAT] 경주결과 조회 실패: $e');
       return null;
+    } finally {
+      _resultInFlight = null;
     }
   }
 
@@ -469,6 +477,11 @@ class KboatScraperService {
 
     entries.sort((a, b) => a.courseNo.compareTo(b.courseNo));
     return entries;
+  }
+
+  void invalidateResultCache() {
+    _resultCache = null;
+    _resultCacheDate = null;
   }
 
   void invalidateCache() {

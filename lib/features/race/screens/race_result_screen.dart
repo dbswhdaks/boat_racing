@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../../core/constants/api_constants.dart';
 import '../../../models/prediction.dart';
@@ -82,6 +83,12 @@ class RaceResultScreen extends ConsumerStatefulWidget {
 class _RaceResultScreenState extends ConsumerState<RaceResultScreen> {
   Timer? _refreshTimer;
 
+  /// 상세 페이지의 "나의 선택"(MyPickRecommender)이 SharedPreferences에 저장한
+  /// 1~3착 코스 번호. 결과 화면에서는 비교표 4번째 컬럼으로 사용한다.
+  List<int?> _userPicks = List.filled(3, null);
+
+  String get _userPicksKey => 'picks_${widget.date}_${widget.raceNo}';
+
   @override
   void initState() {
     super.initState();
@@ -91,6 +98,7 @@ class _RaceResultScreenState extends ConsumerState<RaceResultScreen> {
         _refresh();
       });
     }
+    _loadUserPicks();
   }
 
   @override
@@ -99,11 +107,42 @@ class _RaceResultScreenState extends ConsumerState<RaceResultScreen> {
     super.dispose();
   }
 
+  Future<void> _loadUserPicks() async {
+    final prefs = await SharedPreferences.getInstance();
+    final saved = prefs.getStringList(_userPicksKey);
+    if (!mounted || saved == null) return;
+    final loaded = List<int?>.filled(3, null);
+    for (var i = 0; i < saved.length && i < 3; i++) {
+      loaded[i] = int.tryParse(saved[i]);
+    }
+    setState(() => _userPicks = loaded);
+  }
+
   bool _isToday(String ymd) {
     final now = DateTime.now();
     final t =
         '${now.year}${now.month.toString().padLeft(2, '0')}${now.day.toString().padLeft(2, '0')}';
     return ymd == t;
+  }
+
+  bool _isPastDeparture(String date, int raceNo, List<Race> races) {
+    String depTime = Race.defaultDepartureTimes[raceNo] ?? '';
+    for (final r in races) {
+      if (r.raceNo == raceNo && r.effectiveDepartureTime.isNotEmpty) {
+        depTime = r.effectiveDepartureTime;
+        break;
+      }
+    }
+    if (depTime.isEmpty) return false;
+    final parts = depTime.split(':');
+    if (parts.length < 2) return false;
+    final hh = int.tryParse(parts[0].trim()) ?? 0;
+    final mm = int.tryParse(parts[1].trim()) ?? 0;
+    final cleaned = date.replaceAll('.', '').replaceAll('-', '');
+    final y = int.tryParse(cleaned.substring(0, 4)) ?? 0;
+    final m = int.tryParse(cleaned.substring(4, 6)) ?? 0;
+    final d = int.tryParse(cleaned.substring(6, 8)) ?? 0;
+    return DateTime.now().isAfter(DateTime(y, m, d, hh, mm));
   }
 
   void _refresh() {
@@ -169,6 +208,15 @@ class _RaceResultScreenState extends ConsumerState<RaceResultScreen> {
         !hasFinalRankData &&
         (resultNotYet || rankNotYet);
 
+    String headerLabel;
+    if (hasResultData || hasFinalRankData || isMarkedFinished) {
+      headerLabel = '결과';
+    } else if (_isToday(widget.date) && _isPastDeparture(widget.date, widget.raceNo, raceList)) {
+      headerLabel = '진행중';
+    } else {
+      headerLabel = '진행전';
+    }
+
     RaceResult? fallbackResult;
     if (!hasResultData && finalizedRanks.length >= 3) {
       fallbackResult = RaceResult(
@@ -224,7 +272,7 @@ class _RaceResultScreenState extends ConsumerState<RaceResultScreen> {
                 ],
               ).createShader(bounds),
               child: Text(
-                '$venueName ${widget.raceNo}R 결과',
+                '$venueName ${widget.raceNo}R $headerLabel',
                 style: const TextStyle(
                   fontSize: 24,
                   fontWeight: FontWeight.w800,
@@ -241,7 +289,7 @@ class _RaceResultScreenState extends ConsumerState<RaceResultScreen> {
                   children: [
                     _DateBadge(
                       date: _formatYmdKorean(widget.date),
-                      status: raceStatus,
+                      status: headerLabel,
                       isToday: _isToday(widget.date),
                     ),
                     const SizedBox(height: 12),
@@ -327,6 +375,7 @@ class _RaceResultScreenState extends ConsumerState<RaceResultScreen> {
           entries: ew.data,
           prediction: pred,
           result: resultAsync.valueOrNull,
+          userPicks: _userPicks,
         ),
         loading: () => const SizedBox.shrink(),
         error: (_, __) => const SizedBox.shrink(),
@@ -399,13 +448,13 @@ class _DateBadge extends StatelessWidget {
   }
 
   Color _statusBgColor(String s) {
-    if (s == '확정' || s == '종료' || s == '완료') return _accent;
-    if (s == '진행') return const Color(0xFF22C55E);
+    if (s == '결과' || s == '확정' || s == '종료' || s == '완료') return _accent;
+    if (s == '진행중') return const Color(0xFF22C55E);
     return Colors.grey.shade700;
   }
 
   Color _statusFgColor(String s) {
-    if (s == '확정' || s == '종료' || s == '완료') {
+    if (s == '결과' || s == '확정' || s == '종료' || s == '완료' || s == '진행중') {
       return const Color(0xFF1A1A1A);
     }
     return Colors.white;
@@ -656,20 +705,65 @@ class _PodiumBlock extends StatelessWidget {
 
 // ─── Comparison Section ────────────────────────────────────────────────────────
 
-class _ComparisonSection extends StatelessWidget {
+class _ComparisonSection extends ConsumerWidget {
   const _ComparisonSection({
     required this.entries,
     required this.prediction,
     required this.result,
+    required this.userPicks,
   });
 
   final List<RaceEntry> entries;
   final RacePrediction prediction;
   final RaceResult? result;
 
+  /// SharedPreferences 에 저장된 "나의 선택"(1~3착 코스번호).
+  /// 빈 슬롯은 `null`.
+  final List<int?> userPicks;
+
+  static const Color _aiColor = Color(0xFF10B981);
+  static const Color _compColor = Color(0xFFF59E0B);
+  static const Color _userColor = Color(0xFFFFD700);
+
+  String _racerName(int courseNo) {
+    return entries
+            .where((e) => e.courseNo == courseNo)
+            .firstOrNull
+            ?.racerName ??
+        '';
+  }
+
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     if (result == null) return const SizedBox.shrink();
+
+    final isSubscribed = ref.watch(isSubscribedProvider);
+
+    final header = Row(
+      children: const [
+        Text('✨', style: TextStyle(fontSize: 20)),
+        SizedBox(width: 8),
+        Text(
+          '추천 vs 실제 비교',
+          style: TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.w700,
+            fontSize: 18,
+          ),
+        ),
+      ],
+    );
+
+    if (!isSubscribed) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          header,
+          const SizedBox(height: 16),
+          const _ComparisonPaywallCard(),
+        ],
+      );
+    }
 
     final compSorted = List<RaceEntry>.from(entries)
       ..sort(
@@ -697,30 +791,27 @@ class _ComparisonSection extends StatelessWidget {
       return (courseNo: 0, name: '-');
     });
 
+    final user = List.generate(3, (i) {
+      final no = i < userPicks.length ? userPicks[i] : null;
+      if (no == null) return null;
+      return (courseNo: no, name: _racerName(no));
+    });
+
     int aiMatches = 0;
     int compMatches = 0;
+    int userMatches = 0;
     for (int i = 0; i < 3; i++) {
       if (ai[i].courseNo == actual[i].courseNo) aiMatches++;
       if (comp[i].courseNo == actual[i].courseNo) compMatches++;
+      if (user[i] != null && user[i]!.courseNo == actual[i].courseNo) {
+        userMatches++;
+      }
     }
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Row(
-          children: [
-            Text('✨', style: TextStyle(fontSize: 20)),
-            SizedBox(width: 8),
-            Text(
-              '추천 vs 실제 비교',
-              style: TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.w700,
-                fontSize: 18,
-              ),
-            ),
-          ],
-        ),
+        header,
         const SizedBox(height: 16),
         Container(
           decoration: BoxDecoration(
@@ -731,28 +822,28 @@ class _ComparisonSection extends StatelessWidget {
           child: Column(
             children: [
               Padding(
-                padding: const EdgeInsets.all(12),
+                padding: const EdgeInsets.fromLTRB(8, 10, 8, 10),
                 child: Row(
                   children: [
+                    const SizedBox(width: 30),
+                    const SizedBox(width: 4),
                     Expanded(
                       child: _TabChip(
-                        label: '실제 결과',
-                        color: const Color(0xFF6B7280),
+                        label: '실제',
+                        color: const Color(0xFFFBBF24),
                       ),
                     ),
-                    const SizedBox(width: 6),
+                    const SizedBox(width: 4),
                     Expanded(
-                      child: _TabChip(
-                        label: 'AI 추천',
-                        color: const Color(0xFF10B981),
-                      ),
+                      child: _TabChip(label: 'AI 추천', color: _aiColor),
                     ),
-                    const SizedBox(width: 6),
+                    const SizedBox(width: 4),
                     Expanded(
-                      child: _TabChip(
-                        label: '종합추천',
-                        color: const Color(0xFFF59E0B),
-                      ),
+                      child: _TabChip(label: '종합추천', color: _compColor),
+                    ),
+                    const SizedBox(width: 4),
+                    Expanded(
+                      child: _TabChip(label: '나의 선택', color: _userColor),
                     ),
                   ],
                 ),
@@ -764,8 +855,11 @@ class _ComparisonSection extends StatelessWidget {
                   actual: actual[i],
                   aiPred: ai[i],
                   compPred: comp[i],
+                  userPred: user[i],
                   aiMatch: ai[i].courseNo == actual[i].courseNo,
                   compMatch: comp[i].courseNo == actual[i].courseNo,
+                  userMatch: user[i] != null &&
+                      user[i]!.courseNo == actual[i].courseNo,
                 ),
                 if (i < 2)
                   const Divider(
@@ -783,20 +877,90 @@ class _ComparisonSection extends StatelessWidget {
         Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            _MatchBadge(
-              label: 'AI',
-              matches: aiMatches,
-              color: const Color(0xFF10B981),
-            ),
-            const SizedBox(width: 12),
-            _MatchBadge(
-              label: '종합',
-              matches: compMatches,
-              color: const Color(0xFFF59E0B),
-            ),
+            _MatchBadge(label: 'AI', matches: aiMatches, color: _aiColor),
+            const SizedBox(width: 8),
+            _MatchBadge(label: '종합', matches: compMatches, color: _compColor),
+            const SizedBox(width: 8),
+            _MatchBadge(label: '나의', matches: userMatches, color: _userColor),
           ],
         ),
       ],
+    );
+  }
+}
+
+/// 비구독자에게 노출되는 "추천 vs 실제 비교" 잠금 카드.
+class _ComparisonPaywallCard extends StatelessWidget {
+  const _ComparisonPaywallCard();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: _card,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: _border),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 56,
+            height: 56,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: _accent.withValues(alpha: 0.15),
+              shape: BoxShape.circle,
+              border: Border.all(color: _accent.withValues(alpha: 0.4)),
+            ),
+            child: const Icon(
+              Icons.lock_outline_rounded,
+              size: 28,
+              color: _accent,
+            ),
+          ),
+          const SizedBox(height: 12),
+          const Text(
+            '추천 vs 실제 비교는 구독 후 이용할 수 있습니다.',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 15,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            '결제 완료 후 앱으로 돌아오면 자동으로 잠금이 해제됩니다.',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: Colors.grey.shade400,
+              fontSize: 12,
+              height: 1.45,
+            ),
+          ),
+          const SizedBox(height: 16),
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton.icon(
+              onPressed: () => context.push('/subscription'),
+              icon: const Icon(Icons.workspace_premium_rounded),
+              label: const Text('구독하고 잠금 해제'),
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFF1565C0),
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 13),
+                textStyle: const TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -810,7 +974,7 @@ class _TabChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(vertical: 8),
+      padding: const EdgeInsets.symmetric(vertical: 6),
       decoration: BoxDecoration(
         color: color.withValues(alpha: 0.15),
         borderRadius: BorderRadius.circular(8),
@@ -821,7 +985,7 @@ class _TabChip extends StatelessWidget {
         style: TextStyle(
           color: color,
           fontWeight: FontWeight.w700,
-          fontSize: 13,
+          fontSize: 11,
         ),
       ),
     );
@@ -834,41 +998,45 @@ class _ComparisonRow extends StatelessWidget {
     required this.actual,
     required this.aiPred,
     required this.compPred,
+    required this.userPred,
     required this.aiMatch,
     required this.compMatch,
+    required this.userMatch,
   });
 
   final int rank;
   final ({int courseNo, String name}) actual;
   final ({int courseNo, String name}) aiPred;
   final ({int courseNo, String name}) compPred;
+  final ({int courseNo, String name})? userPred;
   final bool aiMatch;
   final bool compMatch;
+  final bool userMatch;
 
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
       child: Row(
         children: [
           Container(
-            width: 34,
+            width: 30,
             height: 26,
             decoration: BoxDecoration(
               color: _rankColor(rank).withValues(alpha: 0.2),
-              borderRadius: BorderRadius.circular(6),
+              shape: BoxShape.circle,
             ),
             alignment: Alignment.center,
             child: Text(
-              '$rank착',
+              '$rank',
               style: TextStyle(
                 color: _rankColor(rank),
-                fontWeight: FontWeight.w700,
-                fontSize: 11,
+                fontWeight: FontWeight.w800,
+                fontSize: 13,
               ),
             ),
           ),
-          const SizedBox(width: 6),
+          const SizedBox(width: 4),
           Expanded(
             child: _RacerCell(
               courseNo: actual.courseNo,
@@ -876,6 +1044,7 @@ class _ComparisonRow extends StatelessWidget {
               matched: true,
             ),
           ),
+          const SizedBox(width: 4),
           Expanded(
             child: _RacerCell(
               courseNo: aiPred.courseNo,
@@ -883,12 +1052,23 @@ class _ComparisonRow extends StatelessWidget {
               matched: aiMatch,
             ),
           ),
+          const SizedBox(width: 4),
           Expanded(
             child: _RacerCell(
               courseNo: compPred.courseNo,
               name: compPred.name,
               matched: compMatch,
             ),
+          ),
+          const SizedBox(width: 4),
+          Expanded(
+            child: userPred != null
+                ? _RacerCell(
+                    courseNo: userPred!.courseNo,
+                    name: userPred!.name,
+                    matched: userMatch,
+                  )
+                : const _EmptyCell(),
           ),
         ],
       ),
@@ -909,6 +1089,24 @@ class _ComparisonRow extends StatelessWidget {
   }
 }
 
+class _EmptyCell extends StatelessWidget {
+  const _EmptyCell();
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Text(
+        '-',
+        style: TextStyle(
+          color: Colors.white.withValues(alpha: 0.3),
+          fontSize: 12,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+    );
+  }
+}
+
 class _RacerCell extends StatelessWidget {
   const _RacerCell({
     required this.courseNo,
@@ -923,25 +1121,26 @@ class _RacerCell extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
       mainAxisSize: MainAxisSize.min,
       children: [
-        _CourseCircle(courseNo: courseNo, size: 22),
-        const SizedBox(width: 4),
+        _CourseCircle(courseNo: courseNo, size: 20),
+        const SizedBox(width: 3),
         Flexible(
           child: Text(
-            name,
+            name.isNotEmpty ? name : '$courseNo번',
             style: const TextStyle(
               color: Colors.white,
-              fontSize: 12,
-              fontWeight: FontWeight.w500,
+              fontSize: 10,
+              fontWeight: FontWeight.w600,
             ),
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
           ),
         ),
         if (matched) ...[
-          const SizedBox(width: 2),
-          const Icon(Icons.check_circle, color: Color(0xFF22C55E), size: 14),
+          const SizedBox(width: 1),
+          const Icon(Icons.check_circle, color: Color(0xFF22C55E), size: 12),
         ],
       ],
     );
@@ -990,17 +1189,17 @@ class _MatchBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
         color: color.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: color.withValues(alpha: 0.3)),
       ),
       child: Text(
-        '$label $matches/3 적중',
+        '$label $matches/3',
         style: TextStyle(
           color: color,
-          fontWeight: FontWeight.w600,
+          fontWeight: FontWeight.w700,
           fontSize: 12,
         ),
       ),

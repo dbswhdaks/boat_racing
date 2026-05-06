@@ -137,19 +137,22 @@ class BoatRacingApiService {
     final totalPages = (totalCount / rowsPerPage).ceil().clamp(1, 30);
     if (totalPages <= 1) return items;
 
-    final futures = <Future<Response>>[];
-    for (int page = 2; page <= totalPages; page++) {
-      final params = {..._baseParams(pageNo: page, numOfRows: rowsPerPage), ...extraParams};
-      futures.add(_dio.get(url, queryParameters: params));
-    }
-
-    final responses = await Future.wait(futures, eagerError: false);
-    for (final res in responses) {
-      final error = _checkApiError(res.data);
-      if (error != null) continue;
-      final extracted = _extractItems(res.data);
-      for (final item in extracted) {
-        if (item is Map) items.add(Map<String, dynamic>.from(item));
+    const chunkSize = 5;
+    for (int start = 2; start <= totalPages; start += chunkSize) {
+      final end = (start + chunkSize - 1).clamp(start, totalPages);
+      final futures = <Future<Response>>[];
+      for (int page = start; page <= end; page++) {
+        final params = {..._baseParams(pageNo: page, numOfRows: rowsPerPage), ...extraParams};
+        futures.add(_dio.get(url, queryParameters: params));
+      }
+      final responses = await Future.wait(futures, eagerError: false);
+      for (final res in responses) {
+        final error = _checkApiError(res.data);
+        if (error != null) continue;
+        final extracted = _extractItems(res.data);
+        for (final item in extracted) {
+          if (item is Map) items.add(Map<String, dynamic>.from(item));
+        }
       }
     }
 
@@ -222,7 +225,7 @@ class BoatRacingApiService {
     }
   }
 
-  // ─── 출주표 (RACE_DOC 기반 + RACE_INFO 보조) ───
+  // ─── 출주표 (RACE_DOC 기반, KBOAT 스크래핑은 Provider 레벨) ───
 
   Future<ApiResult<List<RaceEntry>>> fetchRaceEntries({
     required String date,
@@ -241,29 +244,6 @@ class BoatRacingApiService {
         }
         return true;
       }).toList();
-
-      if (docMatched.length >= 6) {
-        return ApiResult.success(_buildEntriesFromItems(docMatched));
-      }
-
-      final wd = await getWeekDayForDate(date);
-      if (wd != null) {
-        final allInfoItems = await fetchAllRaceInfo(year: year);
-        final infoMatched = allInfoItems.where((m) {
-          final wt = int.tryParse(m['week_tcnt']?.toString() ?? '') ?? 0;
-          final dt = int.tryParse(m['day_tcnt']?.toString() ?? '') ?? 0;
-          if (wt != wd.$1 || dt != wd.$2) return false;
-          if (rcNo != null) {
-            final rn = int.tryParse(m['race_no']?.toString() ?? '');
-            return rn == rcNo;
-          }
-          return true;
-        }).toList();
-
-        if (infoMatched.length > docMatched.length) {
-          return ApiResult.success(_buildEntriesFromItems(infoMatched));
-        }
-      }
 
       if (docMatched.isNotEmpty) {
         return ApiResult.success(_buildEntriesFromItems(docMatched));

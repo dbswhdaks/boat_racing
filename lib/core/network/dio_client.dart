@@ -4,14 +4,14 @@ import 'package:flutter/foundation.dart';
 Dio createDioClient() {
   final dio = Dio(
     BaseOptions(
-      connectTimeout: const Duration(seconds: 10),
-      receiveTimeout: const Duration(seconds: 12),
+      connectTimeout: const Duration(seconds: 8),
+      receiveTimeout: const Duration(seconds: 10),
       headers: {'Accept': 'application/json'},
     ),
   );
 
   dio.interceptors.add(_ApiLogInterceptor());
-  dio.interceptors.add(_RetryInterceptor(dio: dio, maxRetries: 2));
+  dio.interceptors.add(_RetryInterceptor(dio: dio, maxRetries: 1));
 
   return dio;
 }
@@ -68,7 +68,7 @@ class _RetryInterceptor extends Interceptor {
   final Dio dio;
   final int maxRetries;
 
-  _RetryInterceptor({required this.dio, this.maxRetries = 2});
+  _RetryInterceptor({required this.dio, this.maxRetries = 1});
 
   @override
   void onError(DioException err, ErrorInterceptorHandler handler) async {

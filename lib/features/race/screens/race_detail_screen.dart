@@ -1,12 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:url_launcher/url_launcher.dart';
-import '../../../core/constants/api_constants.dart';
+import '../../../models/race.dart';
 import '../../../models/race_entry.dart';
 import '../../../models/odds.dart';
 import '../providers/race_providers.dart';
 import '../widgets/entry_card.dart';
+import '../widgets/my_pick_recommender.dart';
 import '../widgets/odds_panel.dart';
 import '../widgets/prediction_tab.dart';
 
@@ -66,13 +66,65 @@ class _RaceDetailScreenState extends ConsumerState<RaceDetailScreen>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 2, vsync: this);
+    _tabController = TabController(
+      length: 2,
+      vsync: this,
+      animationDuration: const Duration(milliseconds: 150),
+    );
   }
 
   @override
   void dispose() {
     _tabController.dispose();
     super.dispose();
+  }
+
+  String _raceStatusLabel() {
+    final depTime = Race.defaultDepartureTimes[widget.raceNo] ?? '';
+    if (depTime.isEmpty) return '진행전';
+    final cleaned = widget.date.replaceAll('.', '').replaceAll('-', '');
+    if (cleaned.length < 8) return '진행전';
+    final y = int.tryParse(cleaned.substring(0, 4)) ?? 0;
+    final m = int.tryParse(cleaned.substring(4, 6)) ?? 0;
+    final d = int.tryParse(cleaned.substring(6, 8)) ?? 0;
+    final raceDate = DateTime(y, m, d);
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    if (raceDate.isBefore(today)) return '결과';
+    if (raceDate.isAtSameMomentAs(today)) {
+      final parts = depTime.split(':');
+      if (parts.length >= 2) {
+        final hh = int.tryParse(parts[0].trim()) ?? 0;
+        final mm = int.tryParse(parts[1].trim()) ?? 0;
+        if (now.isAfter(DateTime(y, m, d, hh, mm))) return '결과';
+      }
+      return '진행전';
+    }
+    return '진행전';
+  }
+
+  Widget _buildStatusAction(BuildContext context) {
+    final label = _raceStatusLabel();
+    final IconData icon;
+    final Color color;
+    switch (label) {
+      case '결과':
+        icon = Icons.emoji_events;
+        color = _accent;
+        break;
+      case '진행중':
+        icon = Icons.play_circle_outline;
+        color = const Color(0xFF22C55E);
+        break;
+      default:
+        icon = Icons.schedule;
+        color = Colors.white70;
+    }
+    return TextButton.icon(
+      onPressed: () => context.go('/result/${widget.date}/${widget.raceNo}'),
+      icon: Icon(icon, color: color, size: 20),
+      label: Text(label, style: TextStyle(color: color, fontWeight: FontWeight.w600)),
+    );
   }
 
   @override
@@ -130,11 +182,7 @@ class _RaceDetailScreenState extends ConsumerState<RaceDetailScreen>
               },
             ),
             actions: [
-              TextButton.icon(
-                onPressed: () => context.go('/result/${widget.date}/${widget.raceNo}'),
-                icon: const Icon(Icons.emoji_events, color: _accent, size: 20),
-                label: const Text('결과', style: TextStyle(color: _accent, fontWeight: FontWeight.w600)),
-              ),
+              _buildStatusAction(context),
             ],
             flexibleSpace: FlexibleSpaceBar(
               title: Text(
@@ -167,14 +215,6 @@ class _RaceDetailScreenState extends ConsumerState<RaceDetailScreen>
                             fontSize: 14,
                           ),
                         ),
-                        const SizedBox(height: 6),
-                        Text(
-                          apiError != null ? '※ 일부 데이터는 참고용 목업입니다.' : '실시간 데이터',
-                          style: TextStyle(
-                            color: Colors.white.withValues(alpha: 0.85),
-                            fontSize: 12,
-                          ),
-                        ),
                       ],
                     ),
                   ),
@@ -184,14 +224,11 @@ class _RaceDetailScreenState extends ConsumerState<RaceDetailScreen>
           ),
           SliverToBoxAdapter(
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-              child: _InfoCard(raceNo: widget.raceNo),
-            ),
-          ),
-          SliverToBoxAdapter(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
-              child: _VideoButtons(date: widget.date, raceNo: widget.raceNo),
+              padding: const EdgeInsets.fromLTRB(0, 12, 0, 10),
+              child: MyPickRecommender(
+                date: widget.date,
+                raceNo: widget.raceNo,
+              ),
             ),
           ),
           SliverPersistentHeader(
@@ -203,6 +240,8 @@ class _RaceDetailScreenState extends ConsumerState<RaceDetailScreen>
                 unselectedLabelColor: Colors.white54,
                 indicatorColor: _accent,
                 indicatorWeight: 3,
+                splashFactory: NoSplash.splashFactory,
+                overlayColor: WidgetStateProperty.all(Colors.transparent),
                 tabs: const [
                   Tab(text: '종합추천'),
                   Tab(text: 'AI 추천'),
@@ -214,6 +253,7 @@ class _RaceDetailScreenState extends ConsumerState<RaceDetailScreen>
       },
       body: TabBarView(
         controller: _tabController,
+        physics: const ClampingScrollPhysics(),
         children: [
           _ComprehensiveTab(
             entries: entries,
@@ -225,76 +265,6 @@ class _RaceDetailScreenState extends ConsumerState<RaceDetailScreen>
           PredictionTab(date: widget.date, raceNo: widget.raceNo),
         ],
       ),
-    );
-  }
-}
-
-class _InfoCard extends StatelessWidget {
-  const _InfoCard({required this.raceNo});
-
-  final int raceNo;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: _card,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0xFF30363D)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              const Icon(Icons.place, color: Color(0xFF64B5F6), size: 20),
-              const SizedBox(width: 8),
-              const Text(
-                '미사리경정공원',
-                style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 15),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Wrap(
-            spacing: 16,
-            runSpacing: 8,
-            children: const [
-              _InfoChip(icon: Icons.straighten, label: '거리', value: '600m'),
-              _InfoChip(icon: Icons.groups, label: '출전', value: '6명'),
-              _InfoChip(icon: Icons.tag, label: '경주', value: '고정'),
-            ],
-          ),
-          const SizedBox(height: 6),
-          Text(
-            '경주번호 $raceNo · 경정(모터보트)',
-            style: TextStyle(color: Colors.grey.shade500, fontSize: 12),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _InfoChip extends StatelessWidget {
-  const _InfoChip({required this.icon, required this.label, required this.value});
-
-  final IconData icon;
-  final String label;
-  final String value;
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Icon(icon, size: 16, color: Colors.grey.shade400),
-        const SizedBox(width: 6),
-        Text('$label ', style: TextStyle(color: Colors.grey.shade500, fontSize: 12)),
-        Text(value, style: const TextStyle(color: Colors.white70, fontSize: 13, fontWeight: FontWeight.w500)),
-      ],
     );
   }
 }
@@ -516,106 +486,3 @@ Color _courseColor(int courseNo) {
   return (courseNo >= 1 && courseNo <= 6) ? colors[courseNo - 1] : const Color(0xFF6B7280);
 }
 
-class _VideoButtons extends StatelessWidget {
-  const _VideoButtons({required this.date, required this.raceNo});
-
-  final String date;
-  final int raceNo;
-
-  Future<void> _launchVideo(BuildContext context, String url, String label) async {
-    try {
-      final uri = Uri.parse(url);
-      await launchUrl(uri, mode: LaunchMode.externalApplication);
-    } catch (_) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('$label 영상을 열 수 없습니다.'),
-            backgroundColor: const Color(0xFF30363D),
-          ),
-        );
-      }
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Expanded(
-          child: _VideoBtn(
-            icon: Icons.videocam_outlined,
-            label: '소개항주',
-            color: const Color(0xFF64B5F6),
-            onTap: () => _launchVideo(
-              context,
-              ApiConstants.introVideoUrl(date, raceNo),
-              '소개항주',
-            ),
-          ),
-        ),
-        const SizedBox(width: 10),
-        Expanded(
-          child: _VideoBtn(
-            icon: Icons.play_circle_outline,
-            label: '경주영상',
-            color: const Color(0xFFEF5350),
-            onTap: () => _launchVideo(
-              context,
-              ApiConstants.raceVideoUrl(date, raceNo),
-              '경주',
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _VideoBtn extends StatelessWidget {
-  const _VideoBtn({
-    required this.icon,
-    required this.label,
-    required this.color,
-    required this.onTap,
-  });
-
-  final IconData icon;
-  final String label;
-  final Color color;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: _card,
-      borderRadius: BorderRadius.circular(12),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(12),
-        onTap: onTap,
-        child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 12),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: color.withValues(alpha: 0.3)),
-          ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(icon, color: color, size: 22),
-              const SizedBox(width: 8),
-              Text(
-                label,
-                style: TextStyle(
-                  color: color,
-                  fontWeight: FontWeight.w600,
-                  fontSize: 14,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}

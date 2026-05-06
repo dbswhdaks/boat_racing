@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import '../core/constants/iap_constants.dart';
+import '../features/admin/screens/admin_screen.dart';
 import '../features/home/screens/home_screen.dart';
 import '../features/race/screens/race_detail_screen.dart';
 import '../features/race/screens/race_result_screen.dart';
 import '../features/racer/screens/racer_detail_screen.dart';
 import '../features/settings/screens/api_settings_screen.dart';
+import '../features/subscription/screens/subscription_screen.dart';
 
 final _rootNavigatorKey = GlobalKey<NavigatorState>();
 
@@ -37,5 +40,15 @@ final appRouter = GoRouter(
       },
     ),
     GoRoute(path: '/settings', builder: (context, state) => const ApiSettingsScreen()),
+    GoRoute(
+      path: '/subscription',
+      builder: (context, state) => SubscriptionScreen(
+        initialProductId:
+            state.uri.queryParameters['plan'] == IapConstants.yearlyProductId
+            ? IapConstants.yearlyProductId
+            : IapConstants.monthlyProductId,
+      ),
+    ),
+    GoRoute(path: '/admin', builder: (context, state) => const AdminScreen()),
   ],
 );

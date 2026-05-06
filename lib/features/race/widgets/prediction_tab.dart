@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 
+import '../../../core/constants/iap_constants.dart';
 import '../../../models/prediction.dart';
 import '../providers/race_providers.dart';
 
@@ -30,6 +31,7 @@ Color _factorColor(String key) {
 }
 
 /// AI 예측 결과 탭 — [predictionProvider] 사용
+/// 비구독자에게는 paywall 카드를 노출.
 class PredictionTab extends ConsumerWidget {
   final String date;
   final int raceNo;
@@ -42,6 +44,14 @@ class PredictionTab extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final isSubscribed = ref.watch(isSubscribedProvider);
+    if (!isSubscribed) {
+      return const SingleChildScrollView(
+        padding: EdgeInsets.fromLTRB(16, 20, 16, 36),
+        child: _SubscriptionPaywallCard(),
+      );
+    }
+
     final async = ref.watch(predictionProvider((date: date, raceNo: raceNo)));
     return async.when(
       data: (prediction) => _PredictionLoadedBody(
@@ -63,6 +73,168 @@ class PredictionTab extends ConsumerWidget {
             textAlign: TextAlign.center,
             style: GoogleFonts.notoSansKr(color: Colors.white70),
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// AI 추천 paywall — 월간/연간 선택 후 /subscription 으로 이동.
+class _SubscriptionPaywallCard extends StatefulWidget {
+  const _SubscriptionPaywallCard();
+
+  @override
+  State<_SubscriptionPaywallCard> createState() =>
+      _SubscriptionPaywallCardState();
+}
+
+class _SubscriptionPaywallCardState extends State<_SubscriptionPaywallCard> {
+  bool _isMonthly = true;
+
+  void _goToSubscription() {
+    final plan = _isMonthly
+        ? IapConstants.monthlyProductId
+        : IapConstants.yearlyProductId;
+    context.push('/subscription?plan=$plan');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final actionLabel = _isMonthly ? '월간 구독 결제' : '연간 구독 결제';
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: const Color(0xFF161B22),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFF30363D)),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 56,
+            height: 56,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: _kAccent.withValues(alpha: 0.15),
+              shape: BoxShape.circle,
+              border: Border.all(color: _kAccent.withValues(alpha: 0.4)),
+            ),
+            child: const Icon(
+              Icons.lock_outline_rounded,
+              size: 28,
+              color: _kAccent,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            'AI 추천은 구독 후 이용할 수 있습니다.',
+            textAlign: TextAlign.center,
+            style: GoogleFonts.notoSansKr(
+              color: Colors.white,
+              fontSize: 16,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            '결제 완료 후 앱으로 돌아오면 자동으로 잠금이 해제됩니다.',
+            textAlign: TextAlign.center,
+            style: GoogleFonts.notoSansKr(
+              color: Colors.white70,
+              fontSize: 13,
+              height: 1.45,
+            ),
+          ),
+          const SizedBox(height: 16),
+          _PaywallPlanTile(
+            selected: _isMonthly,
+            label: '월간 ￦ 9,900원',
+            onTap: () => setState(() => _isMonthly = true),
+          ),
+          const SizedBox(height: 10),
+          _PaywallPlanTile(
+            selected: !_isMonthly,
+            label: '연간 ￦ 99,000원 (17% 절약)',
+            onTap: () => setState(() => _isMonthly = false),
+          ),
+          const SizedBox(height: 16),
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton.icon(
+              onPressed: _goToSubscription,
+              icon: const Icon(Icons.workspace_premium_rounded),
+              label: Text(actionLabel),
+              style: FilledButton.styleFrom(
+                backgroundColor: _kPrimary,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                textStyle: const TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PaywallPlanTile extends StatelessWidget {
+  const _PaywallPlanTile({
+    required this.selected,
+    required this.label,
+    required this.onTap,
+  });
+
+  final bool selected;
+  final String label;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(12),
+      onTap: onTap,
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        decoration: BoxDecoration(
+          color: selected
+              ? _kAccent.withValues(alpha: 0.15)
+              : Colors.white.withValues(alpha: 0.02),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: selected
+                ? _kAccent.withValues(alpha: 0.7)
+                : const Color(0xFF30363D),
+          ),
+        ),
+        child: Row(
+          children: [
+            Icon(
+              selected
+                  ? Icons.radio_button_checked_rounded
+                  : Icons.radio_button_unchecked_rounded,
+              color: selected ? _kAccent : Colors.grey.shade500,
+              size: 20,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                label,
+                style: GoogleFonts.notoSansKr(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                  color: selected ? _kAccent : Colors.white,
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -217,22 +389,6 @@ class _AiTopPick extends StatelessWidget {
                   fontSize: 15,
                 ),
               ),
-              const Spacer(),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                decoration: BoxDecoration(
-                  color: _rankAccent.withValues(alpha: 0.15),
-                  borderRadius: BorderRadius.circular(6),
-                ),
-                child: Text(
-                  '승률 ${racer.winProb.toStringAsFixed(1)}%',
-                  style: GoogleFonts.notoSansKr(
-                    color: _rankAccent,
-                    fontWeight: FontWeight.w600,
-                    fontSize: 11,
-                  ),
-                ),
-              ),
             ],
           ),
           const SizedBox(height: 14),
@@ -303,23 +459,23 @@ class _AiTopPick extends StatelessWidget {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                 decoration: BoxDecoration(
-                  color: _kPrimary.withValues(alpha: 0.2),
+                  color: _kAccent.withValues(alpha: 0.15),
                   borderRadius: BorderRadius.circular(10),
                 ),
                 child: Column(
                   children: [
                     Text(
-                      '${racer.rank}',
+                      '${racer.winProb.toStringAsFixed(1)}%',
                       style: GoogleFonts.notoSansKr(
-                        color: Colors.white,
+                        color: _kAccent,
                         fontWeight: FontWeight.w800,
-                        fontSize: 20,
+                        fontSize: 18,
                       ),
                     ),
                     Text(
-                      '위',
+                      '승률',
                       style: GoogleFonts.notoSansKr(
-                        color: Colors.white54,
+                        color: _kAccent.withValues(alpha: 0.7),
                         fontSize: 10,
                       ),
                     ),
