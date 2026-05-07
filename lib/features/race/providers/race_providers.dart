@@ -407,11 +407,24 @@ final predictionProvider =
       params,
     ) async {
       final backup = ref.watch(supabaseBackupProvider);
-      final entriesResult = await ref.watch(
-        raceEntriesProvider((date: params.date, raceNo: params.raceNo)).future,
-      );
+      final results = await Future.wait([
+        ref.watch(
+          raceEntriesProvider((
+            date: params.date,
+            raceNo: params.raceNo,
+          )).future,
+        ),
+        ref.watch(
+          oddsProvider((date: params.date, raceNo: params.raceNo)).future,
+        ),
+      ]);
 
-      final prediction = PredictionEngine.predict(entriesResult.data);
+      final entriesResult = results[0] as DataWithSource<List<RaceEntry>>;
+      final odds = results[1] as Odds;
+      final prediction = PredictionEngine.predict(
+        entriesResult.data,
+        odds: odds,
+      );
       backup.savePrediction(
         date: params.date,
         raceNo: params.raceNo,

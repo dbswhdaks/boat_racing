@@ -256,6 +256,8 @@ class _RaceDetailScreenState extends ConsumerState<RaceDetailScreen>
         physics: const ClampingScrollPhysics(),
         children: [
           _ComprehensiveTab(
+            date: widget.date,
+            raceNo: widget.raceNo,
             entries: entries,
             odds: odds,
             popRankByCourse: popRankByCourse,
@@ -271,6 +273,8 @@ class _RaceDetailScreenState extends ConsumerState<RaceDetailScreen>
 
 class _ComprehensiveTab extends StatelessWidget {
   const _ComprehensiveTab({
+    required this.date,
+    required this.raceNo,
     required this.entries,
     required this.odds,
     required this.popRankByCourse,
@@ -278,6 +282,8 @@ class _ComprehensiveTab extends StatelessWidget {
     required this.topComprehensive,
   });
 
+  final String date;
+  final int raceNo;
   final List<RaceEntry> entries;
   final Odds odds;
   final Map<int, int> popRankByCourse;
@@ -349,6 +355,20 @@ class _ComprehensiveTab extends StatelessWidget {
             '※ 배당·기록은 참고용이며, 실제 투표 및 결과와 다를 수 있습니다.',
             textAlign: TextAlign.justify,
             style: TextStyle(color: Colors.grey.shade600, fontSize: 11, height: 1.4),
+          ),
+        ),
+        const SizedBox(height: 16),
+        FilledButton.icon(
+          onPressed: () => context.push('/result/$date/$raceNo'),
+          style: FilledButton.styleFrom(
+            backgroundColor: _primary,
+            foregroundColor: Colors.white,
+            padding: const EdgeInsets.symmetric(vertical: 14),
+          ),
+          icon: const Icon(Icons.flag_outlined),
+          label: const Text(
+            '경주 결과 보기',
+            style: TextStyle(fontWeight: FontWeight.w600),
           ),
         ),
         const SizedBox(height: 40),

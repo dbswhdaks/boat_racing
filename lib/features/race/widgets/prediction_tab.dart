@@ -26,6 +26,8 @@ Color _factorColor(String key) {
     '평균득점' => Colors.blue.shade300,
     '최근 전적' => Colors.green.shade300,
     '코스' => Colors.purple.shade300,
+    '체중' => Colors.teal.shade300,
+    '배당' => Colors.amber.shade300,
     _ => Colors.grey.shade500,
   };
 }
@@ -36,11 +38,7 @@ class PredictionTab extends ConsumerWidget {
   final String date;
   final int raceNo;
 
-  const PredictionTab({
-    super.key,
-    required this.date,
-    required this.raceNo,
-  });
+  const PredictionTab({super.key, required this.date, required this.raceNo});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -269,10 +267,17 @@ class _PredictionLoadedBody extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           if (sorted.isNotEmpty) ...[
-            ...sorted.take(3).map((r) => Padding(
-              padding: const EdgeInsets.only(bottom: 10),
-              child: _AiTopPick(racer: r, confidence: prediction.confidence),
-            )),
+            ...sorted
+                .take(3)
+                .map(
+                  (r) => Padding(
+                    padding: const EdgeInsets.only(bottom: 10),
+                    child: _AiTopPick(
+                      racer: r,
+                      confidence: prediction.confidence,
+                    ),
+                  ),
+                ),
             const SizedBox(height: 6),
           ],
           _ConfidenceGauge(confidence: prediction.confidence),
@@ -286,26 +291,19 @@ class _PredictionLoadedBody extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 12),
-          ...sorted.map((r) => _RankBarRow(
-                racer: r,
-                maxScore: maxScore,
-                gradeColor: _gradeColor(r.grade),
-              )),
+          ...sorted.map(
+            (r) => _RankBarRow(
+              racer: r,
+              maxScore: maxScore,
+              gradeColor: _gradeColor(r.grade),
+            ),
+          ),
           const SizedBox(height: 24),
-          _BettingSection(
-            title: '단승',
-            picks: prediction.winPicks,
-          ),
+          _BettingSection(title: '단승', picks: prediction.winPicks),
           const SizedBox(height: 16),
-          _BettingSection(
-            title: '복승',
-            picks: prediction.placePicks,
-          ),
+          _BettingSection(title: '복승', picks: prediction.placePicks),
           const SizedBox(height: 16),
-          _BettingSection(
-            title: '쌍승',
-            picks: prediction.quinellaPicks,
-          ),
+          _BettingSection(title: '쌍승', picks: prediction.quinellaPicks),
           const SizedBox(height: 24),
           _AnalysisCard(analysis: prediction.analysis),
           const SizedBox(height: 24),
@@ -318,10 +316,9 @@ class _PredictionLoadedBody extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 12),
-          ...sorted.take(3).map((r) => _FactorCard(
-                racer: r,
-                factorColor: _factorColor,
-              )),
+          ...sorted
+              .take(3)
+              .map((r) => _FactorCard(racer: r, factorColor: _factorColor)),
           const SizedBox(height: 24),
           _Disclaimer(),
           const SizedBox(height: 16),
@@ -366,10 +363,7 @@ class _AiTopPick extends StatelessWidget {
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [
-            _rankAccent.withValues(alpha: 0.1),
-            const Color(0xFF161B22),
-          ],
+          colors: [_rankAccent.withValues(alpha: 0.1), const Color(0xFF161B22)],
         ),
         borderRadius: BorderRadius.circular(14),
         border: Border.all(color: _rankAccent.withValues(alpha: 0.4)),
@@ -429,7 +423,10 @@ class _AiTopPick extends StatelessWidget {
                     Row(
                       children: [
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 2,
+                          ),
                           decoration: BoxDecoration(
                             color: gColor.withValues(alpha: 0.15),
                             borderRadius: BorderRadius.circular(4),
@@ -457,7 +454,10 @@ class _AiTopPick extends StatelessWidget {
                 ),
               ),
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 8,
+                ),
                 decoration: BoxDecoration(
                   color: _kAccent.withValues(alpha: 0.15),
                   borderRadius: BorderRadius.circular(10),
@@ -558,7 +558,9 @@ class _RankBarRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final ratio = maxScore > 0 ? (racer.totalScore / maxScore).clamp(0.0, 1.0) : 0.0;
+    final ratio = maxScore > 0
+        ? (racer.totalScore / maxScore).clamp(0.0, 1.0)
+        : 0.0;
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
@@ -644,10 +646,7 @@ class _BettingSection extends StatelessWidget {
   final String title;
   final List<BettingPick> picks;
 
-  const _BettingSection({
-    required this.title,
-    required this.picks,
-  });
+  const _BettingSection({required this.title, required this.picks});
 
   @override
   Widget build(BuildContext context) {
@@ -675,10 +674,12 @@ class _BettingSection extends StatelessWidget {
                 ),
               )
             else
-              ...picks.map((p) => Padding(
-                    padding: const EdgeInsets.only(bottom: 10),
-                    child: _BettingPickTile(pick: p),
-                  )),
+              ...picks.map(
+                (p) => Padding(
+                  padding: const EdgeInsets.only(bottom: 10),
+                  child: _BettingPickTile(pick: p),
+                ),
+              ),
           ],
         ),
       ),
@@ -790,10 +791,7 @@ class _FactorCard extends StatelessWidget {
   final RacerPrediction racer;
   final Color Function(String) factorColor;
 
-  const _FactorCard({
-    required this.racer,
-    required this.factorColor,
-  });
+  const _FactorCard({required this.racer, required this.factorColor});
 
   @override
   Widget build(BuildContext context) {
@@ -811,7 +809,10 @@ class _FactorCard extends StatelessWidget {
             Row(
               children: [
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
                   decoration: BoxDecoration(
                     color: _gradeColor(racer.grade).withValues(alpha: 0.2),
                     borderRadius: BorderRadius.circular(8),
@@ -889,7 +890,9 @@ class _Disclaimer extends StatelessWidget {
               style: GoogleFonts.notoSansKr(
                 fontSize: 12,
                 height: 1.4,
-                color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.85),
+                color: Theme.of(
+                  context,
+                ).colorScheme.onSurface.withValues(alpha: 0.85),
               ),
             ),
           ),
