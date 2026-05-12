@@ -15,11 +15,21 @@ const _card = Color(0xFF161B22);
 const _primary = Color(0xFF1565C0);
 const _accent = Color(0xFFFBBF24);
 
-/// 종합 추천 점수: 등급 + 평균득점 + 최근 3착
+/// 종합 추천 점수: 등급 + 평균득점 + 승률(또는 최근 3착 수)
+///
+/// `recent3Wins`은 데이터 출처에 따라 두 의미를 가짐:
+///   * 0~3: 최근 3경기 우승 수 (각 우승당 약 3.3점)
+///   * 4 이상: 승률(%) — 100% 만점 기준으로 10점 환산 후 가중
 double comprehensiveScore(RaceEntry e) {
   const gradeScores = {'A1': 10.0, 'A2': 7.5, 'B1': 5.0, 'B2': 3.0};
   final g = gradeScores[e.grade] ?? 4.0;
-  return g * 2.0 + e.avgScore * 1.5 + e.recent3Wins * 2.0;
+  final r = e.recent3Wins;
+  final recentNormalized = r <= 0
+      ? 0.0
+      : r <= 3
+          ? (r / 3 * 10)
+          : (r / 100 * 10).clamp(0.0, 10.0);
+  return g * 2.0 + e.avgScore * 1.5 + recentNormalized * 2.0;
 }
 
 String formatYmdKorean(String ymd) {

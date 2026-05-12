@@ -30,10 +30,13 @@ class KboatRaceResultBundle {
 class KboatScraperService {
   static const _baseUrl = 'https://www.kboat.or.kr/broadcast/racevideo';
   static const _resultUrl = 'https://www.kboat.or.kr/main/race/result';
+  static const _cardUrl = 'https://www.kboat.or.kr/race/card/decision';
   final Dio _dio = dioClient;
 
   final Map<String, List<KboatVideoInfo>> _cache = {};
   final Map<String, Set<String>> _monthDatesCache = {};
+  final Map<int, Map<String, (int, int)>> _dateMappingCache = {};
+  final Map<String, List<Race>> _cardRaceListCache = {};
   KboatRaceResultBundle? _resultCache;
   String? _resultCacheDate;
 
@@ -165,7 +168,15 @@ class KboatScraperService {
   }
 
   /// 특정 날짜의 경주 목록을 Race 객체로 변환
+  ///
+  /// 우선순위:
+  /// 1. 확정출주표 페이지(`/race/card/decision`) — 오늘/미래 경주 포함, 출발시간·거리 포함
+  /// 2. 경주영상 페이지(`/broadcast/racevideo`) — 과거 경주(영상 존재) 한정
   Future<List<Race>> fetchRaceList({required String date}) async {
+    final cardRaces = await fetchRaceListFromCard(date: date)
+        .catchError((_) => <Race>[]);
+    if (cardRaces.isNotEmpty) return cardRaces;
+
     final year = date.substring(0, 4);
     final mm = date.substring(4, 6);
 
@@ -196,6 +207,135 @@ class KboatScraperService {
         racerCount: 6,
       );
     }).toList();
+  }
+
+  // ─── 확정출주표 페이지 기반 (오늘/미래 경주 지원) ───
+
+  /// `/race/card/decision` 페이지에서 연간 (날짜 → 회차/일차) 매핑 추출
+  Future<Map<String, (int, int)>> fetchDateMappings({int? year}) async {
+    final y = year ?? DateTime.now().year;
+    if (_dateMappingCache.containsKey(y)) return _dateMappingCache[y]!;
+
+    try {
+      final res = await _dio.post(
+        _cardUrl,
+        data: FormData.fromMap({'stndYear': y.toString()}),
+        options: Options(headers: {
+          'X-Requested-With': 'XMLHttpRequest',
+          'Accept': 'text/html',
+        }),
+      );
+
+      final html = res.data?.toString() ?? '';
+      if (html.isEmpty) return {};
+
+      // (NN회 N일) MM월 DD일 패턴
+      final pattern = RegExp(
+        r'\((\d+)회\s*(\d+)일\)\s*(\d{1,2})월\s*(\d{1,2})일',
+      );
+
+      final mappings = <String, (int, int)>{};
+      for (final m in pattern.allMatches(html)) {
+        final tms = int.parse(m.group(1)!);
+        final day = int.parse(m.group(2)!);
+        final mm = m.group(3)!.padLeft(2, '0');
+        final dd = m.group(4)!.padLeft(2, '0');
+        mappings['$y$mm$dd'] = (tms, day);
+      }
+
+      _dateMappingCache[y] = mappings;
+      return mappings;
+    } catch (e) {
+      if (kDebugMode) debugPrint('[KBOAT] 날짜 매핑 스크래핑 실패: $e');
+      return {};
+    }
+  }
+
+  /// 특정 날짜에 해당하는 (week_tcnt, day_tcnt) 조회
+  Future<(int, int)?> getWeekDayForDate(String date) async {
+    if (date.length != 8) return null;
+    final year = int.parse(date.substring(0, 4));
+    final mappings = await fetchDateMappings(year: year);
+    return mappings[date];
+  }
+
+  /// 확정출주표 페이지에서 경주 목록 추출 (오늘/미래 경주 표시용)
+  Future<List<Race>> fetchRaceListFromCard({required String date}) async {
+    if (_cardRaceListCache.containsKey(date)) {
+      return _cardRaceListCache[date]!;
+    }
+
+    final wd = await getWeekDayForDate(date);
+    if (wd == null) return [];
+
+    try {
+      final year = date.substring(0, 4);
+      final res = await _dio.post(
+        _cardUrl,
+        data: FormData.fromMap({
+          'stndYear': year,
+          'tms': wd.$1.toString(),
+          'dayOrd': wd.$2.toString(),
+        }),
+        options: Options(headers: {
+          'X-Requested-With': 'XMLHttpRequest',
+          'Accept': 'text/html',
+        }),
+      );
+
+      final html = res.data?.toString() ?? '';
+      if (html.isEmpty) return [];
+
+      final races = _parseRaceListFromCardHtml(html, date);
+      _cardRaceListCache[date] = races;
+      return races;
+    } catch (e) {
+      if (kDebugMode) debugPrint('[KBOAT] 출주표 경주 목록 실패: $e');
+      return [];
+    }
+  }
+
+  List<Race> _parseRaceListFromCardHtml(String html, String date) {
+    final racePattern = RegExp(
+      r'제\s*(\d+)경주\s*\(\s*출발시간\s*(\d{1,2}:\d{2})\s*\)',
+    );
+    final distPattern = RegExp(
+      r'(?:일반|메이퀸)\s+(?:플라잉|온라인)\s+\d주회\s*\(\s*(\d+)m\s*\)',
+    );
+
+    final matches = racePattern.allMatches(html).toList();
+    if (matches.isEmpty) return [];
+
+    // 동일 raceNo가 HTML 내 여러 위치에 등장(제목/표 헤더)하므로 중복 제거.
+    final byRaceNo = <int, Race>{};
+    for (int i = 0; i < matches.length; i++) {
+      final m = matches[i];
+      final raceNo = int.parse(m.group(1)!);
+      if (byRaceNo.containsKey(raceNo)) continue;
+
+      final time = m.group(2)!;
+      final segEnd = i + 1 < matches.length ? matches[i + 1].start : html.length;
+      final segment = html.substring(m.start, segEnd);
+      final distMatch = distPattern.firstMatch(segment);
+      final distance = distMatch != null
+          ? int.tryParse(distMatch.group(1)!) ?? 600
+          : 600;
+
+      byRaceNo[raceNo] = Race(
+        venueCode: 1,
+        date: date,
+        raceNo: raceNo,
+        venueName: '미사리경정공원',
+        distance: distance,
+        status: '예정',
+        departureTime: time,
+        racerCount: 6,
+      );
+    }
+
+    final races = byRaceNo.values.toList()
+      ..sort((a, b) => a.raceNo.compareTo(b.raceNo));
+    return races;
   }
 
   Future<KboatRaceResultBundle?>? _resultInFlight;
@@ -347,7 +487,6 @@ class KboatScraperService {
 
   // ─── 출주표 스크래핑 (KBOAT 확정출주표) ───
 
-  static const _cardUrl = 'https://www.kboat.or.kr/race/card/decision';
   final Map<String, List<RaceEntry>> _entryCache = {};
 
   Future<List<RaceEntry>> fetchRaceEntries({
@@ -425,10 +564,12 @@ class KboatScraperService {
     r'<div\s+class="other">\s*(\d+)기/([\w\d]+)/(\d+)세',
   );
 
-  static final _weightPattern = RegExp(
-    r'</th>\s*<td>(\d+)</td>',
+  static final _tdCellPattern = RegExp(
+    r'<td[^>]*>(.*?)</td>',
     dotAll: true,
   );
+
+  static final _tagStripPattern = RegExp(r'<[^>]+>');
 
   List<RaceEntry> _parseRacerRows(String section) {
     final entries = <RaceEntry>[];
@@ -454,16 +595,30 @@ class KboatScraperService {
       final name = nameMatch.group(2)!.trim();
 
       String grade = '';
-      double? weight;
-
       final infoMatch = _infoPattern.firstMatch(row);
       if (infoMatch != null) {
         grade = infoMatch.group(2)!.trim();
       }
 
-      final weightMatch = _weightPattern.firstMatch(row);
-      if (weightMatch != null) {
-        weight = double.tryParse(weightMatch.group(1) ?? '');
+      // 선수정보(<th>) 이후의 <td> 셀들을 순서대로 추출.
+      // 컬럼 순서: [체중, 평균착순점, 평균득점, 승률, 연대율, 삼연대율, 평균ST, ...]
+      final thEnd = row.indexOf('</th>');
+      final afterTh = thEnd >= 0 ? row.substring(thEnd + 5) : row;
+      final cells = _tdCellPattern.allMatches(afterTh).map((m) {
+        final inner = m.group(1) ?? '';
+        return inner.replaceAll(_tagStripPattern, '').trim();
+      }).toList();
+
+      final weight = cells.isNotEmpty
+          ? double.tryParse(cells[0])
+          : null;
+      final avgScore = cells.length > 2
+          ? (double.tryParse(cells[2]) ?? 0.0)
+          : 0.0;
+      int winRate = 0;
+      if (cells.length > 3) {
+        final wr = cells[3].replaceAll('%', '').trim();
+        winRate = (double.tryParse(wr) ?? 0).round();
       }
 
       entries.add(RaceEntry(
@@ -471,6 +626,8 @@ class KboatScraperService {
         racerName: name,
         racerId: racerId,
         grade: grade,
+        avgScore: avgScore,
+        recent3Wins: winRate,
         weight: weight,
       ));
     }
@@ -484,9 +641,20 @@ class KboatScraperService {
     _resultCacheDate = null;
   }
 
+  /// 수동 새로고침 시 호출 — 결과/출주표/경주목록 캐시는 비우고,
+  /// 연간 날짜 매핑(`_dateMappingCache`)은 보존하여 재요청 비용을 줄임.
+  void invalidateForRefresh() {
+    _resultCache = null;
+    _resultCacheDate = null;
+    _cardRaceListCache.clear();
+    _entryCache.clear();
+  }
+
   void invalidateCache() {
     _cache.clear();
     _monthDatesCache.clear();
+    _dateMappingCache.clear();
+    _cardRaceListCache.clear();
     _resultCache = null;
     _resultCacheDate = null;
     _entryCache.clear();

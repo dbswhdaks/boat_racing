@@ -81,22 +81,31 @@ final monthRaceDatesProvider =
       final kboat = ref.watch(kboatScraperProvider);
 
       final dates = <String>{};
+      final monthPrefix =
+          '${params.year}${params.month.toString().padLeft(2, '0')}';
 
       final results = await Future.wait([
         api.fetchRaceDatesForMonth(year: params.year, month: params.month),
         kboat
             .fetchRaceDatesForMonth(year: params.year, month: params.month)
             .catchError((_) => <String>{}),
+        kboat
+            .fetchDateMappings(year: params.year)
+            .catchError((_) => <String, (int, int)>{}),
       ]);
 
       final apiResult = results[0] as ApiResult<Set<String>>;
       final kboatDates = results[1] as Set<String>;
+      final kboatMappings = results[2] as Map<String, (int, int)>;
 
       if (apiResult.isSuccess && apiResult.data != null) {
         dates.addAll(apiResult.data!);
       }
       if (kboatDates.isNotEmpty) {
         dates.addAll(kboatDates);
+      }
+      for (final ymd in kboatMappings.keys) {
+        if (ymd.startsWith(monthPrefix)) dates.add(ymd);
       }
 
       if (dates.isNotEmpty) return dates;
@@ -212,7 +221,8 @@ final raceEntriesProvider =
 
       if (apiEntries.length < 6) {
         try {
-          final wd = await api.getWeekDayForDate(params.date);
+          var wd = await api.getWeekDayForDate(params.date);
+          wd ??= await kboat.getWeekDayForDate(params.date);
           if (wd != null) {
             final kboatEntries = await kboat.fetchRaceEntries(
               weekTcnt: wd.$1,

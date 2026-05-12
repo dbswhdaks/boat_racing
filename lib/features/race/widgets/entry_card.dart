@@ -99,7 +99,7 @@ class EntryCard extends ConsumerWidget {
                     ),
                     const SizedBox(height: 6),
                     Text(
-                      '평균득점 ${entry.avgScore.toStringAsFixed(2)} · 최근 3회 ${entry.recent3Wins}승',
+                      '평균득점 ${entry.avgScore.toStringAsFixed(2)} · 승률 ${entry.recent3Wins}%',
                       style: GoogleFonts.notoSansKr(
                         fontSize: 12,
                         color: theme.colorScheme.onSurface.withValues(alpha: 0.75),

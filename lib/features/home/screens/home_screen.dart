@@ -80,7 +80,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   void _refreshNow() {
     final selected = ref.read(selectedDateProvider);
     final ymd = dateToYmd(selected);
-    ref.read(kboatScraperProvider).invalidateResultCache();
+    ref.read(kboatScraperProvider).invalidateForRefresh();
     ref.invalidate(raceListProvider((date: ymd)));
     ref.read(_lastRefreshProvider.notifier).state = DateTime.now();
   }
@@ -223,41 +223,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                 final bottomSafe = MediaQuery.of(context).padding.bottom;
                 return ListView.builder(
                   padding: EdgeInsets.fromLTRB(16, 0, 16, 24 + bottomSafe),
-                  itemCount:
-                      races.length + (wrapped.apiError != null && !wrapped.fromApi ? 1 : 0),
+                  itemCount: races.length,
                   itemBuilder: (context, index) {
-                    if (wrapped.apiError != null && !wrapped.fromApi && index == 0) {
-                      return Padding(
-                        padding: const EdgeInsets.only(bottom: 12),
-                        child: Material(
-                          color: const Color(0xFF21262D),
-                          borderRadius: BorderRadius.circular(10),
-                          child: Padding(
-                            padding: const EdgeInsets.all(12),
-                            child: Row(
-                              children: [
-                                const Icon(Icons.cloud_off_rounded,
-                                    color: Colors.orange, size: 22),
-                                const SizedBox(width: 10),
-                                Expanded(
-                                  child: Text(
-                                    'API: ${wrapped.apiError}',
-                                    style: const TextStyle(
-                                      color: Colors.white70,
-                                      fontSize: 13,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      );
-                    }
-                    final i = wrapped.apiError != null && !wrapped.fromApi ? index - 1 : index;
                     return Padding(
                       padding: const EdgeInsets.only(bottom: 12),
-                      child: RaceCard(race: races[i]),
+                      child: RaceCard(race: races[index]),
                     );
                   },
                 );
