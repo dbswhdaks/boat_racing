@@ -6,9 +6,9 @@ import 'package:go_router/go_router.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../../../core/widgets/shimmer_loading.dart';
-import '../../../features/admin/providers/admin_auth_provider.dart';
 import '../../../features/race/providers/race_providers.dart';
 import '../../../models/race.dart';
+import '../widgets/directions_sheet.dart';
 import '../widgets/month_calendar_sheet.dart';
 import '../widgets/race_card.dart';
 
@@ -427,10 +427,13 @@ class _HomeDrawer extends ConsumerWidget {
     context.push(location);
   }
 
+  void _openDirections(BuildContext context) {
+    Navigator.of(context).pop();
+    showMisariDirectionsSheet(context);
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final isAdmin = ref.watch(adminAuthProvider);
-
     return Drawer(
       backgroundColor: _kCard,
       child: SafeArea(
@@ -482,42 +485,6 @@ class _HomeDrawer extends ConsumerWidget {
                       fontSize: 12,
                     ),
                   ),
-                  if (isAdmin) ...[
-                    const SizedBox(height: 12),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 5,
-                      ),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF22C55E).withValues(alpha: 0.2),
-                        borderRadius: BorderRadius.circular(999),
-                        border: Border.all(
-                          color: const Color(0xFF22C55E)
-                              .withValues(alpha: 0.5),
-                        ),
-                      ),
-                      child: const Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            Icons.verified_user_rounded,
-                            size: 12,
-                            color: Color(0xFF22C55E),
-                          ),
-                          SizedBox(width: 4),
-                          Text(
-                            '관리자 모드',
-                            style: TextStyle(
-                              color: Color(0xFF22C55E),
-                              fontSize: 11,
-                              fontWeight: FontWeight.w800,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
                 ],
               ),
             ),
@@ -529,17 +496,10 @@ class _HomeDrawer extends ConsumerWidget {
               onTap: () => _go(context, '/subscription'),
             ),
             _DrawerItem(
-              icon: Icons.shield_outlined,
-              iconColor: const Color(0xFF22C55E),
-              label: '관리자 페이지',
-              trailing: isAdmin
-                  ? const Icon(
-                      Icons.check_circle_rounded,
-                      size: 18,
-                      color: Color(0xFF22C55E),
-                    )
-                  : null,
-              onTap: () => _go(context, '/admin'),
+              icon: Icons.directions_rounded,
+              iconColor: Color(0xFF38BDF8),
+              label: '미사리 경정장 가는길',
+              onTap: () => _openDirections(context),
             ),
             const Spacer(),
             const Divider(color: Color(0xFF30363D), height: 1),
@@ -566,14 +526,12 @@ class _DrawerItem extends StatelessWidget {
     required this.iconColor,
     required this.label,
     required this.onTap,
-    this.trailing,
   });
 
   final IconData icon;
   final Color iconColor;
   final String label;
   final VoidCallback onTap;
-  final Widget? trailing;
 
   @override
   Widget build(BuildContext context) {
@@ -587,7 +545,6 @@ class _DrawerItem extends StatelessWidget {
           fontWeight: FontWeight.w600,
         ),
       ),
-      trailing: trailing,
       onTap: onTap,
     );
   }

@@ -5,7 +5,6 @@ import '../../../core/services/boat_racing_api_service.dart';
 import '../../../core/services/kboat_scraper_service.dart';
 import '../../../core/services/prediction_engine.dart';
 import '../../../core/services/supabase_backup_service.dart';
-import '../../../features/admin/providers/admin_auth_provider.dart';
 import '../../../features/subscription/providers/in_app_purchase_provider.dart';
 import '../../../models/race.dart';
 import '../../../models/race_entry.dart';
@@ -33,13 +32,9 @@ final selectedDateProvider = StateProvider<DateTime>((ref) {
   return DateTime(now.year, now.month, now.day);
 });
 
-/// 구독 활성 여부 — 다음 중 하나라도 참이면 모든 잠금이 해제된다.
-/// 1) 관리자 로그인 상태(adminAuthProvider == true)
-/// 2) Google Play 인앱결제 보유 productId 중 하나가
-///    [IapConstants.subscriptionProductIds]에 포함.
+/// 구독 활성 여부 — Google Play 인앱결제 보유 productId 중 하나가
+/// [IapConstants.subscriptionProductIds]에 포함되면 잠금 해제.
 final isSubscribedProvider = Provider<bool>((ref) {
-  final isAdmin = ref.watch(adminAuthProvider);
-  if (isAdmin) return true;
   final iapState = ref.watch(inAppPurchaseProvider);
   return iapState.purchasedProductIds.any(
     IapConstants.subscriptionProductIds.contains,
