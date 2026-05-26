@@ -49,5 +49,12 @@
 	<array>
 		<string>nmap</string>
 	</array>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>가까운 경정장(본장·장외발매소)을 거리순으로 정렬하기 위해 현재 위치를 사용합니다.</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>fetch</string>
+		<string>remote-notification</string>
+	</array>
 </dict>
 </plist>

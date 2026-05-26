@@ -49,3 +49,7 @@ android/key.properties
 *.jks
 *.keystore
 .env
+
+# Deploy secrets (Firebase App Distribution, Play supply 등)
+.deploy.env
+release_notes.txt

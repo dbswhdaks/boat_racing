@@ -1,6 +1,11 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET"/>
     <uses-permission android:name="com.android.vending.BILLING"/>
+    <!-- 가까운 경정장 정렬용 위치 권한 (foreground only) -->
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
+    <!-- FCM 푸시 알림 (Android 13+ runtime permission) -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <application
         android:label="경정 Plus"
         android:name="${applicationName}"
@@ -43,7 +48,7 @@
             <action android:name="android.intent.action.PROCESS_TEXT"/>
             <data android:mimeType="text/plain"/>
         </intent>
-        <!-- 네이버 지도 앱 호출 (길찾기) -->
+        <!-- 네이버 지도 앱(nmap://) 호출용 — Android 11+ 패키지 가시성 정책 대응 -->
         <package android:name="com.nhn.android.nmap"/>
         <intent>
             <action android:name="android.intent.action.VIEW"/>

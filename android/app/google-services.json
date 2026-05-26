@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "644307699007",
+    "project_id": "boat-racing-233fe",
+    "storage_bucket": "boat-racing-233fe.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:644307699007:android:db8008df1c3f304cb3bf8a",
+        "android_client_info": {
+          "package_name": "com.boat_racing"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAcjsGQMpbAoY5SsFa_HjFoHM5GKD0u3dc"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

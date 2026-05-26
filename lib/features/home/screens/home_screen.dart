@@ -428,8 +428,13 @@ class _HomeDrawer extends ConsumerWidget {
   }
 
   void _openDirections(BuildContext context) {
+    // drawer를 닫은 직후엔 drawer의 context가 unmount 직전 상태가 되어
+    // showModalBottomSheet이 정상 동작하지 않는다.
+    // root navigator의 context를 미리 잡아두고 sheet을 띄운다.
+    final rootContext =
+        Navigator.of(context, rootNavigator: true).context;
     Navigator.of(context).pop();
-    showMisariDirectionsSheet(context);
+    showBoatVenuesDirectionsSheet(rootContext);
   }
 
   @override
@@ -498,7 +503,7 @@ class _HomeDrawer extends ConsumerWidget {
             _DrawerItem(
               icon: Icons.directions_rounded,
               iconColor: Color(0xFF38BDF8),
-              label: '미사리 경정장 가는길',
+              label: '전국 경정장 가는길',
               onTap: () => _openDirections(context),
             ),
             const Spacer(),
