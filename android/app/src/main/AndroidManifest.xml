@@ -6,6 +6,8 @@
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
     <!-- FCM 푸시 알림 (Android 13+ runtime permission) -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+    <!-- Firebase Analytics 광고 ID 권한 (Android 13+ API 33 타겟팅 시 필수) -->
+    <uses-permission android:name="com.google.android.gms.permission.AD_ID"/>
     <application
         android:label="경정 Plus"
         android:name="${applicationName}"

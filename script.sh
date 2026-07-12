@@ -43,23 +43,6 @@ open_folder() {
     esac
 }
 
-# pubspec.yaml 의 version 한 단계 올리기 (예: 1.0.11+11 → 1.0.12+12)
-bump_version() {
-    local line name_part build_part major minor patch new_patch new_build new_version
-    line=$(grep '^version:' pubspec.yaml)
-    name_part=$(echo "$line" | sed -E 's/^version:[[:space:]]*([0-9]+\.[0-9]+\.[0-9]+)\+([0-9]+).*/\1/')
-    build_part=$(echo "$line" | sed -E 's/^version:[[:space:]]*([0-9]+\.[0-9]+\.[0-9]+)\+([0-9]+).*/\2/')
-    major=$(echo "$name_part" | cut -d. -f1)
-    minor=$(echo "$name_part" | cut -d. -f2)
-    patch=$(echo "$name_part" | cut -d. -f3)
-    new_patch=$((patch + 1))
-    new_build=$((build_part + 1))
-    new_version="${major}.${minor}.${new_patch}+${new_build}"
-    awk -v new="version: ${new_version}" '/^version:/ { print new; next } { print }' \
-        pubspec.yaml > pubspec.yaml.tmp && mv pubspec.yaml.tmp pubspec.yaml
-    ok "버전 변경: ${name_part}+${build_part}  →  ${new_version}"
-}
-
 # ─────────────────────────────────────────────
 # 메뉴
 # ─────────────────────────────────────────────
@@ -71,7 +54,7 @@ echo "============================================"
 echo
 echo "  [1] GitHub 자동 업로드   (add → commit → push)"
 echo "  [2] Firebase 자동 업로드 (웹 빌드 + Hosting 배포)"
-echo "  [3] 앱 빌드             (버전업 + AAB 빌드 + 폴더 열기)"
+echo "  [3] 앱 빌드             (AAB 빌드 + 폴더 열기) — 버전은 pubspec.yaml 에서 직접 수정"
 echo "  [q] 종료"
 echo
 read -p "Run: " selection
@@ -139,13 +122,14 @@ case "$selection" in
         ;;
 
     3)
-        log "앱 빌드 (버전업 + AAB)"
+        log "앱 빌드 (AAB)"
 
-        # 1) 버전 자동 증가 — Play Console 은 동일 버전코드 재업로드를 거부한다.
-        bump_version
-        NEW_VERSION=$(grep '^version:' pubspec.yaml | sed 's/version:[[:space:]]*//' | tr -d '\r')
+        # 현재 pubspec.yaml 에 적힌 버전 그대로 빌드한다.
+        # Play Console 은 동일 버전코드 재업로드를 거부하므로,
+        # 빌드 전에 pubspec.yaml 의 version 을 직접 수정해두어야 한다.
+        BUILD_VERSION=$(grep '^version:' pubspec.yaml | sed 's/version:[[:space:]]*//' | tr -d '\r')
+        echo "   빌드할 버전: ${BUILD_VERSION}"
 
-        # 2) 의존성 동기화 후 릴리즈 AAB 빌드
         flutter pub get
         flutter build appbundle --release
 
@@ -161,7 +145,7 @@ case "$selection" in
         open_folder "$AAB_DIR"
 
         echo
-        ok "AAB 빌드 완료 (version ${NEW_VERSION})"
+        ok "AAB 빌드 완료 (version ${BUILD_VERSION})"
         echo "   파일: ${AAB_PATH}"
         echo
         echo "다음 단계 — Play Console 업로드:"

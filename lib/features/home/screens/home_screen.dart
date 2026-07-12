@@ -2,8 +2,8 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/widgets/shimmer_loading.dart';
 import '../../../features/race/providers/race_providers.dart';
@@ -422,11 +422,6 @@ class _HomeError extends StatelessWidget {
 class _HomeDrawer extends ConsumerWidget {
   const _HomeDrawer();
 
-  void _go(BuildContext context, String location) {
-    Navigator.of(context).pop();
-    context.push(location);
-  }
-
   void _openDirections(BuildContext context) {
     // drawer를 닫은 직후엔 drawer의 context가 unmount 직전 상태가 되어
     // showModalBottomSheet이 정상 동작하지 않는다.
@@ -435,6 +430,40 @@ class _HomeDrawer extends ConsumerWidget {
         Navigator.of(context, rootNavigator: true).context;
     Navigator.of(context).pop();
     showBoatVenuesDirectionsSheet(rootContext);
+  }
+
+  Future<void> _openPlayStore(BuildContext context, String packageId) async {
+    final messenger = ScaffoldMessenger.of(context);
+    Navigator.of(context).pop();
+
+    final marketUri = Uri.parse('market://details?id=$packageId');
+    final webUri = Uri.parse(
+      'https://play.google.com/store/apps/details?id=$packageId',
+    );
+
+    try {
+      final ok = await launchUrl(
+        marketUri,
+        mode: LaunchMode.externalApplication,
+      );
+      if (ok) return;
+    } catch (_) {}
+
+    try {
+      final ok = await launchUrl(
+        webUri,
+        mode: LaunchMode.externalApplication,
+      );
+      if (!ok) {
+        messenger.showSnackBar(
+          const SnackBar(content: Text('Play 스토어를 열 수 없습니다.')),
+        );
+      }
+    } catch (_) {
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Play 스토어를 열 수 없습니다.')),
+      );
+    }
   }
 
   @override
@@ -493,20 +522,54 @@ class _HomeDrawer extends ConsumerWidget {
                 ],
               ),
             ),
-            const SizedBox(height: 8),
-            _DrawerItem(
-              icon: Icons.workspace_premium_rounded,
-              iconColor: _kGold,
-              label: '구독하기',
-              onTap: () => _go(context, '/subscription'),
+            Expanded(
+              child: ListView(
+                padding: const EdgeInsets.fromLTRB(14, 18, 14, 8),
+                children: [
+                  const _DrawerSectionHeader(
+                    icon: Icons.apps_rounded,
+                    label: '추천 앱',
+                  ),
+                  const SizedBox(height: 8),
+                  _DrawerItem(
+                    icon: Icons.sports_score_rounded,
+                    iconColor: const Color(0xFFEF4444),
+                    label: '경마Plus',
+                    subtitle: 'AI 경마 예상 · 실시간 경주결과',
+                    isExternal: true,
+                    onTap: () => _openPlayStore(
+                      context,
+                      'com.horseracingplus.app',
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  _DrawerItem(
+                    icon: Icons.pedal_bike_rounded,
+                    iconColor: const Color(0xFFFBBF24),
+                    label: '경륜Plus',
+                    subtitle: '실시간 경륜정보 · 경기 결과',
+                    isExternal: true,
+                    onTap: () => _openPlayStore(
+                      context,
+                      'com.gyeongryunplus.app',
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                  const _DrawerSectionHeader(
+                    icon: Icons.dashboard_customize_rounded,
+                    label: '바로가기',
+                  ),
+                  const SizedBox(height: 8),
+                  _DrawerItem(
+                    icon: Icons.directions_rounded,
+                    iconColor: const Color(0xFF38BDF8),
+                    label: '전국 경정장 가는길',
+                    subtitle: '미사리 · 하남 경정공원 안내',
+                    onTap: () => _openDirections(context),
+                  ),
+                ],
+              ),
             ),
-            _DrawerItem(
-              icon: Icons.directions_rounded,
-              iconColor: Color(0xFF38BDF8),
-              label: '전국 경정장 가는길',
-              onTap: () => _openDirections(context),
-            ),
-            const Spacer(),
             const Divider(color: Color(0xFF30363D), height: 1),
             Padding(
               padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
@@ -525,32 +588,148 @@ class _HomeDrawer extends ConsumerWidget {
   }
 }
 
+class _DrawerSectionHeader extends StatelessWidget {
+  const _DrawerSectionHeader({
+    required this.icon,
+    required this.label,
+  });
+
+  final IconData icon;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(6, 0, 6, 0),
+      child: Row(
+        children: [
+          Icon(icon, size: 14, color: Colors.grey.shade500),
+          const SizedBox(width: 6),
+          Text(
+            label,
+            style: TextStyle(
+              color: Colors.grey.shade400,
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 0.6,
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Container(
+              height: 1,
+              color: const Color(0xFF30363D).withValues(alpha: 0.6),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _DrawerItem extends StatelessWidget {
   const _DrawerItem({
     required this.icon,
     required this.iconColor,
     required this.label,
     required this.onTap,
+    this.subtitle,
+    this.isExternal = false,
   });
 
   final IconData icon;
   final Color iconColor;
   final String label;
+  final String? subtitle;
   final VoidCallback onTap;
+  final bool isExternal;
 
   @override
   Widget build(BuildContext context) {
-    return ListTile(
-      leading: Icon(icon, color: iconColor, size: 22),
-      title: Text(
-        label,
-        style: const TextStyle(
-          color: Colors.white,
-          fontSize: 14,
-          fontWeight: FontWeight.w600,
+    const cardColor = Color(0xFF1C232D);
+    const borderColor = Color(0xFF262E38);
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(14),
+        splashColor: iconColor.withValues(alpha: 0.12),
+        highlightColor: iconColor.withValues(alpha: 0.06),
+        child: Ink(
+          decoration: BoxDecoration(
+            color: cardColor,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: borderColor),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+            child: Row(
+              children: [
+                Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [
+                        iconColor.withValues(alpha: 0.22),
+                        iconColor.withValues(alpha: 0.08),
+                      ],
+                    ),
+                    borderRadius: BorderRadius.circular(11),
+                    border: Border.all(
+                      color: iconColor.withValues(alpha: 0.35),
+                      width: 1,
+                    ),
+                  ),
+                  child: Icon(icon, color: iconColor, size: 20),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        label,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 14.5,
+                          fontWeight: FontWeight.w700,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      if (subtitle != null) ...[
+                        const SizedBox(height: 2),
+                        Text(
+                          subtitle!,
+                          style: TextStyle(
+                            color: Colors.white.withValues(alpha: 0.55),
+                            fontSize: 11.5,
+                            height: 1.25,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Icon(
+                  isExternal
+                      ? Icons.open_in_new_rounded
+                      : Icons.chevron_right_rounded,
+                  size: isExternal ? 16 : 20,
+                  color: Colors.white.withValues(alpha: 0.35),
+                ),
+              ],
+            ),
+          ),
         ),
       ),
-      onTap: onTap,
     );
   }
 }
