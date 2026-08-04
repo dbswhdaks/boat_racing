@@ -1,4 +1,5 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
     <uses-permission android:name="android.permission.INTERNET"/>
     <uses-permission android:name="com.android.vending.BILLING"/>
     <!-- 가까운 경정장 정렬용 위치 권한 (foreground only) -->
@@ -6,8 +7,12 @@
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
     <!-- FCM 푸시 알림 (Android 13+ runtime permission) -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
-    <!-- Firebase Analytics 광고 ID 권한 (Android 13+ API 33 타겟팅 시 필수) -->
-    <uses-permission android:name="com.google.android.gms.permission.AD_ID"/>
+    <!-- Firebase Analytics 광고 ID 권한 (Android 13+ API 33 타겟팅 시 필수)
+         일부 라이브러리가 tools:node="remove"로 제거하는 것을 방지하기 위해
+         tools:node="replace"로 강제 유지 -->
+    <uses-permission
+        android:name="com.google.android.gms.permission.AD_ID"
+        tools:node="replace"/>
     <application
         android:label="경정 Plus"
         android:name="${applicationName}"
