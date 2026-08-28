@@ -6,17 +6,12 @@ import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../../core/constants/api_constants.dart';
+import '../../../core/services/prediction_engine.dart';
 import '../../../models/prediction.dart';
 import '../../../models/race.dart';
 import '../../../models/race_entry.dart';
 import '../../../models/race_result.dart';
 import '../providers/race_providers.dart';
-
-double _comprehensiveScore(RaceEntry e) {
-  const gradeScores = {'A1': 10.0, 'A2': 7.5, 'B1': 5.0, 'B2': 3.0};
-  final g = gradeScores[e.grade] ?? 4.0;
-  return g * 2.0 + e.avgScore * 1.5 + e.recent3Wins * 2.0;
-}
 
 const _bg = Color(0xFF0D1117);
 const _card = Color(0xFF161B22);
@@ -70,8 +65,7 @@ Color _courseTextColor(int courseNo) {
 }
 
 class RaceResultScreen extends ConsumerStatefulWidget {
-  const RaceResultScreen(
-      {super.key, required this.date, required this.raceNo});
+  const RaceResultScreen({super.key, required this.date, required this.raceNo});
 
   final String date;
   final int raceNo;
@@ -151,7 +145,7 @@ class _RaceResultScreenState extends ConsumerState<RaceResultScreen> {
     ref.invalidate(raceRankProvider(p));
     ref.invalidate(raceEntriesProvider(p));
     ref.invalidate(oddsProvider(p));
-    ref.invalidate(predictionProvider(p));
+    ref.invalidate(predictionEvaluationProvider(p));
   }
 
   String _formatYmdKorean(String ymd) {
@@ -169,6 +163,9 @@ class _RaceResultScreenState extends ConsumerState<RaceResultScreen> {
     final rankAsync = ref.watch(raceRankProvider(p));
     final entriesAsync = ref.watch(raceEntriesProvider(p));
     final predAsync = ref.watch(predictionProvider(p));
+    if (resultAsync.hasValue && predAsync.hasValue) {
+      ref.watch(predictionEvaluationProvider(p));
+    }
     final racesAsync = ref.watch(raceListProvider((date: widget.date)));
 
     String venueName = '미사리경정공원';
@@ -188,13 +185,13 @@ class _RaceResultScreenState extends ConsumerState<RaceResultScreen> {
     }
 
     final rankRows = rankAsync.valueOrNull ?? const <Map<String, dynamic>>[];
-    final finalizedRanks = rankRows
-        .where((r) {
+    final finalizedRanks =
+        rankRows.where((r) {
           final rank = _rankValue(r);
           return rank != null && rank > 0;
-        })
-        .toList()
-      ..sort((a, b) => (_rankValue(a) ?? 99).compareTo(_rankValue(b) ?? 99));
+        }).toList()..sort(
+          (a, b) => (_rankValue(a) ?? 99).compareTo(_rankValue(b) ?? 99),
+        );
 
     final hasResultData = resultAsync.valueOrNull != null;
     final hasFinalRankData = finalizedRanks.isNotEmpty;
@@ -203,7 +200,8 @@ class _RaceResultScreenState extends ConsumerState<RaceResultScreen> {
     final isMarkedFinished =
         raceStatus == '확정' || raceStatus == '종료' || raceStatus == '완료';
 
-    final preRace = !isMarkedFinished &&
+    final preRace =
+        !isMarkedFinished &&
         !hasResultData &&
         !hasFinalRankData &&
         (resultNotYet || rankNotYet);
@@ -211,7 +209,8 @@ class _RaceResultScreenState extends ConsumerState<RaceResultScreen> {
     String headerLabel;
     if (hasResultData || hasFinalRankData || isMarkedFinished) {
       headerLabel = '결과';
-    } else if (_isToday(widget.date) && _isPastDeparture(widget.date, widget.raceNo, raceList)) {
+    } else if (_isToday(widget.date) &&
+        _isPastDeparture(widget.date, widget.raceNo, raceList)) {
       headerLabel = '진행중';
     } else {
       headerLabel = '진행전';
@@ -303,8 +302,8 @@ class _RaceResultScreenState extends ConsumerState<RaceResultScreen> {
                         loading: () => const Padding(
                           padding: EdgeInsets.all(32),
                           child: Center(
-                              child:
-                                  CircularProgressIndicator(color: _accent)),
+                            child: CircularProgressIndicator(color: _accent),
+                          ),
                         ),
                         error: (e, _) {
                           if (_isNotYet(e) && fallbackResult != null) {
@@ -313,7 +312,9 @@ class _RaceResultScreenState extends ConsumerState<RaceResultScreen> {
                           return Padding(
                             padding: const EdgeInsets.all(16),
                             child: Text(
-                              _isNotYet(e) ? '경주 결과 집계 중입니다.' : '경주 결과를 불러오지 못했습니다.',
+                              _isNotYet(e)
+                                  ? '경주 결과 집계 중입니다.'
+                                  : '경주 결과를 불러오지 못했습니다.',
                               style: const TextStyle(color: Colors.white70),
                             ),
                           );
@@ -334,19 +335,35 @@ class _RaceResultScreenState extends ConsumerState<RaceResultScreen> {
                             : const Padding(
                                 padding: EdgeInsets.all(16),
                                 child: Center(
-                                    child: CircularProgressIndicator(
-                                        color: _accent)),
+                                  child: CircularProgressIndicator(
+                                    color: _accent,
+                                  ),
+                                ),
                               ),
                         error: (_, __) {
                           final r = resultAsync.valueOrNull ?? fallbackResult;
                           if (r != null && r.first.isNotEmpty) {
-                            return _RankListSection(ranks: [
-                              {'rank': 1, 'course_no': r.firstNo, 'racer_nm': r.first},
-                              if (r.second.isNotEmpty)
-                                {'rank': 2, 'course_no': r.secondNo, 'racer_nm': r.second},
-                              if (r.third.isNotEmpty)
-                                {'rank': 3, 'course_no': r.thirdNo, 'racer_nm': r.third},
-                            ]);
+                            return _RankListSection(
+                              ranks: [
+                                {
+                                  'rank': 1,
+                                  'course_no': r.firstNo,
+                                  'racer_nm': r.first,
+                                },
+                                if (r.second.isNotEmpty)
+                                  {
+                                    'rank': 2,
+                                    'course_no': r.secondNo,
+                                    'racer_nm': r.second,
+                                  },
+                                if (r.third.isNotEmpty)
+                                  {
+                                    'rank': 3,
+                                    'course_no': r.thirdNo,
+                                    'racer_nm': r.third,
+                                  },
+                              ],
+                            );
                           }
                           return const SizedBox.shrink();
                         },
@@ -423,8 +440,10 @@ class _DateBadge extends StatelessWidget {
           ),
           if (isToday) ...[
             const SizedBox(width: 8),
-            Text('(오늘)',
-                style: TextStyle(color: Colors.grey.shade500, fontSize: 12)),
+            Text(
+              '(오늘)',
+              style: TextStyle(color: Colors.grey.shade500, fontSize: 12),
+            ),
           ],
           const Spacer(),
           Container(
@@ -767,7 +786,11 @@ class _ComparisonSection extends ConsumerWidget {
 
     final compSorted = List<RaceEntry>.from(entries)
       ..sort(
-          (a, b) => _comprehensiveScore(b).compareTo(_comprehensiveScore(a)));
+        (a, b) => PredictionEngine.comprehensiveScore(
+          b,
+          entries,
+        ).compareTo(PredictionEngine.comprehensiveScore(a, entries)),
+      );
     final compTop = compSorted.take(3).toList();
     final aiTop = prediction.rankings.take(3).toList();
 
@@ -807,6 +830,7 @@ class _ComparisonSection extends ConsumerWidget {
         userMatches++;
       }
     }
+    final evaluation = PredictionEngine.evaluate(prediction, result!);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -858,7 +882,8 @@ class _ComparisonSection extends ConsumerWidget {
                   userPred: user[i],
                   aiMatch: ai[i].courseNo == actual[i].courseNo,
                   compMatch: comp[i].courseNo == actual[i].courseNo,
-                  userMatch: user[i] != null &&
+                  userMatch:
+                      user[i] != null &&
                       user[i]!.courseNo == actual[i].courseNo,
                 ),
                 if (i < 2)
@@ -884,7 +909,46 @@ class _ComparisonSection extends ConsumerWidget {
             _MatchBadge(label: '나의', matches: userMatches, color: _userColor),
           ],
         ),
+        const SizedBox(height: 8),
+        Wrap(
+          alignment: WrapAlignment.center,
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            _HitBadge(label: '단승', hit: evaluation.winHit),
+            _HitBadge(label: '복승', hit: evaluation.placeHit),
+            _HitBadge(label: '쌍승', hit: evaluation.quinellaHit),
+          ],
+        ),
       ],
+    );
+  }
+}
+
+class _HitBadge extends StatelessWidget {
+  const _HitBadge({required this.label, required this.hit});
+
+  final String label;
+  final bool hit;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = hit ? const Color(0xFF22C55E) : Colors.white38;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: color.withValues(alpha: 0.3)),
+      ),
+      child: Text(
+        '$label ${hit ? '적중' : '미적중'}',
+        style: TextStyle(
+          color: color,
+          fontSize: 11,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
     );
   }
 }
@@ -1244,7 +1308,10 @@ class _OddsSection extends StatelessWidget {
   Widget _dash() {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 3),
-      child: Text('–', style: TextStyle(color: Colors.grey.shade500, fontSize: 13)),
+      child: Text(
+        '–',
+        style: TextStyle(color: Colors.grey.shade500, fontSize: 13),
+      ),
     );
   }
 
@@ -1597,11 +1664,8 @@ class _VideoRow extends StatelessWidget {
       icon: Icons.play_circle_outline,
       label: '경주영상',
       color: const Color(0xFFEF5350),
-      onTap: () => _launch(
-        context,
-        ApiConstants.raceVideoUrl(date, raceNo),
-        '경주',
-      ),
+      onTap: () =>
+          _launch(context, ApiConstants.raceVideoUrl(date, raceNo), '경주'),
     );
   }
 }

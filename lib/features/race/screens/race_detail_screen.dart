@@ -1,36 +1,18 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import '../../../core/services/prediction_engine.dart';
 import '../../../models/race.dart';
 import '../../../models/race_entry.dart';
-import '../../../models/odds.dart';
 import '../providers/race_providers.dart';
 import '../widgets/entry_card.dart';
 import '../widgets/my_pick_recommender.dart';
-import '../widgets/odds_panel.dart';
 import '../widgets/prediction_tab.dart';
 
 const _bg = Color(0xFF0D1117);
 const _card = Color(0xFF161B22);
 const _primary = Color(0xFF1565C0);
 const _accent = Color(0xFFFBBF24);
-
-/// 종합 추천 점수: 등급 + 평균득점 + 승률(또는 최근 3착 수)
-///
-/// `recent3Wins`은 데이터 출처에 따라 두 의미를 가짐:
-///   * 0~3: 최근 3경기 우승 수 (각 우승당 약 3.3점)
-///   * 4 이상: 승률(%) — 100% 만점 기준으로 10점 환산 후 가중
-double comprehensiveScore(RaceEntry e) {
-  const gradeScores = {'A1': 10.0, 'A2': 7.5, 'B1': 5.0, 'B2': 3.0};
-  final g = gradeScores[e.grade] ?? 4.0;
-  final r = e.recent3Wins;
-  final recentNormalized = r <= 0
-      ? 0.0
-      : r <= 3
-          ? (r / 3 * 10)
-          : (r / 100 * 10).clamp(0.0, 10.0);
-  return g * 2.0 + e.avgScore * 1.5 + recentNormalized * 2.0;
-}
 
 String formatYmdKorean(String ymd) {
   if (ymd.length != 8) return ymd;
@@ -40,18 +22,10 @@ String formatYmdKorean(String ymd) {
   return '$y년 $m월 $d일';
 }
 
-/// 배당 기준 인기 순 (단승 배당 낮을수록 유리)
-List<RaceEntry> popularityOrder(List<RaceEntry> entries, Odds odds) {
-  final copy = List<RaceEntry>.from(entries);
-  copy.sort((a, b) {
-    final oa = odds.win[a.courseNo] ?? 9999.0;
-    final ob = odds.win[b.courseNo] ?? 9999.0;
-    return oa.compareTo(ob);
-  });
-  return copy;
-}
-
-Map<int, int> _rankByCourse(List<RaceEntry> ordered, int Function(RaceEntry) key) {
+Map<int, int> _rankByCourse(
+  List<RaceEntry> ordered,
+  int Function(RaceEntry) key,
+) {
   final map = <int, int>{};
   for (var i = 0; i < ordered.length; i++) {
     map[key(ordered[i])] = i + 1;
@@ -133,7 +107,10 @@ class _RaceDetailScreenState extends ConsumerState<RaceDetailScreen>
     return TextButton.icon(
       onPressed: () => context.go('/result/${widget.date}/${widget.raceNo}'),
       icon: Icon(icon, color: color, size: 20),
-      label: Text(label, style: TextStyle(color: color, fontWeight: FontWeight.w600)),
+      label: Text(
+        label,
+        style: TextStyle(color: color, fontWeight: FontWeight.w600),
+      ),
     );
   }
 
@@ -141,34 +118,31 @@ class _RaceDetailScreenState extends ConsumerState<RaceDetailScreen>
   Widget build(BuildContext context) {
     final params = (date: widget.date, raceNo: widget.raceNo);
     final entriesAsync = ref.watch(raceEntriesProvider(params));
-    final oddsAsync = ref.watch(oddsProvider(params));
-
-    final odds = oddsAsync.valueOrNull ?? const Odds();
 
     return Scaffold(
       backgroundColor: _bg,
       body: entriesAsync.when(
         data: (entriesWithSource) {
           final entries = entriesWithSource.data;
-          return _buildBody(context, entries, odds, entriesWithSource.apiError);
+          return _buildBody(context, entries);
         },
-        loading: () => const Center(child: CircularProgressIndicator(color: _primary)),
-        error: (e, _) => Center(child: Text('출주표: $e', style: const TextStyle(color: Colors.white70))),
+        loading: () =>
+            const Center(child: CircularProgressIndicator(color: _primary)),
+        error: (e, _) => Center(
+          child: Text('출주표: $e', style: const TextStyle(color: Colors.white70)),
+        ),
       ),
     );
   }
 
-  Widget _buildBody(
-    BuildContext context,
-    List<RaceEntry> entries,
-    Odds odds,
-    String? apiError,
-  ) {
-    final popOrder = popularityOrder(entries, odds);
-    final popRankByCourse = _rankByCourse(popOrder, (e) => e.courseNo);
-
+  Widget _buildBody(BuildContext context, List<RaceEntry> entries) {
     final compSorted = List<RaceEntry>.from(entries)
-      ..sort((a, b) => comprehensiveScore(b).compareTo(comprehensiveScore(a)));
+      ..sort(
+        (a, b) => PredictionEngine.comprehensiveScore(
+          b,
+          entries,
+        ).compareTo(PredictionEngine.comprehensiveScore(a, entries)),
+      );
     final compRankByCourse = _rankByCourse(compSorted, (e) => e.courseNo);
 
     final topComprehensive = compSorted.take(3).toList();
@@ -191,13 +165,14 @@ class _RaceDetailScreenState extends ConsumerState<RaceDetailScreen>
                 }
               },
             ),
-            actions: [
-              _buildStatusAction(context),
-            ],
+            actions: [_buildStatusAction(context)],
             flexibleSpace: FlexibleSpaceBar(
               title: Text(
                 '${widget.raceNo}R · 미사리경정공원',
-                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
               background: Container(
                 decoration: const BoxDecoration(
@@ -269,8 +244,6 @@ class _RaceDetailScreenState extends ConsumerState<RaceDetailScreen>
             date: widget.date,
             raceNo: widget.raceNo,
             entries: entries,
-            odds: odds,
-            popRankByCourse: popRankByCourse,
             compRankByCourse: compRankByCourse,
             topComprehensive: topComprehensive,
           ),
@@ -286,8 +259,6 @@ class _ComprehensiveTab extends StatelessWidget {
     required this.date,
     required this.raceNo,
     required this.entries,
-    required this.odds,
-    required this.popRankByCourse,
     required this.compRankByCourse,
     required this.topComprehensive,
   });
@@ -295,14 +266,16 @@ class _ComprehensiveTab extends StatelessWidget {
   final String date;
   final int raceNo;
   final List<RaceEntry> entries;
-  final Odds odds;
-  final Map<int, int> popRankByCourse;
   final Map<int, int> compRankByCourse;
   final List<RaceEntry> topComprehensive;
 
   @override
   Widget build(BuildContext context) {
-    const rankColors = [Color(0xFFFBBF24), Color(0xFF9CA3AF), Color(0xFFCD7F32)];
+    const rankColors = [
+      Color(0xFFFBBF24),
+      Color(0xFF9CA3AF),
+      Color(0xFFCD7F32),
+    ];
     const rankLabels = ['1위', '2위', '3위'];
     final top3 = topComprehensive.take(3).toList();
 
@@ -316,13 +289,17 @@ class _ComprehensiveTab extends StatelessWidget {
               SizedBox(width: 8),
               Text(
                 '종합 추천 TOP 3',
-                style: TextStyle(color: _accent, fontWeight: FontWeight.w700, fontSize: 16),
+                style: TextStyle(
+                  color: _accent,
+                  fontWeight: FontWeight.w700,
+                  fontSize: 16,
+                ),
               ),
             ],
           ),
           const SizedBox(height: 4),
           Text(
-            '등급·평균득점·최근 3착을 반영한 점수 상위',
+            '등급·득점·승률·ST·코스·장비를 반영한 점수 상위',
             style: TextStyle(color: Colors.grey.shade500, fontSize: 12),
           ),
           const SizedBox(height: 12),
@@ -335,7 +312,7 @@ class _ComprehensiveTab extends StatelessWidget {
                 rank: rankLabels[i],
                 rankColor: rankColors[i],
                 entry: entry,
-                score: comprehensiveScore(entry),
+                score: PredictionEngine.comprehensiveScore(entry, entries),
               ),
             );
           }),
@@ -343,7 +320,11 @@ class _ComprehensiveTab extends StatelessWidget {
         ],
         const Text(
           '전체 출주표',
-          style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 16),
+          style: TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.w600,
+            fontSize: 16,
+          ),
         ),
         const SizedBox(height: 8),
         ...entries.map(
@@ -351,20 +332,8 @@ class _ComprehensiveTab extends StatelessWidget {
             padding: const EdgeInsets.only(bottom: 10),
             child: EntryCard(
               entry: e,
-              popularityRank: popRankByCourse[e.courseNo],
               comprehensiveRank: compRankByCourse[e.courseNo],
             ),
-          ),
-        ),
-        const SizedBox(height: 16),
-        OddsPanel(odds: odds),
-        const SizedBox(height: 12),
-        SizedBox(
-          width: double.infinity,
-          child: Text(
-            '※ 배당·기록은 참고용이며, 실제 투표 및 결과와 다를 수 있습니다.',
-            textAlign: TextAlign.justify,
-            style: TextStyle(color: Colors.grey.shade600, fontSize: 11, height: 1.4),
           ),
         ),
         const SizedBox(height: 16),
@@ -399,11 +368,12 @@ class _SliverTabBarDelegate extends SliverPersistentHeaderDelegate {
   double get maxExtent => tabBar.preferredSize.height;
 
   @override
-  Widget build(BuildContext context, double shrinkOffset, bool overlapsContent) {
-    return Container(
-      color: _bg,
-      child: tabBar,
-    );
+  Widget build(
+    BuildContext context,
+    double shrinkOffset,
+    bool overlapsContent,
+  ) {
+    return Container(color: _bg, child: tabBar);
   }
 
   @override
@@ -465,7 +435,10 @@ class _RankRow extends StatelessWidget {
             child: Text(
               '${entry.courseNo}',
               style: TextStyle(
-                color: (entry.courseNo == 2 || entry.courseNo == 3 || entry.courseNo == 6)
+                color:
+                    (entry.courseNo == 2 ||
+                        entry.courseNo == 3 ||
+                        entry.courseNo == 6)
                     ? Colors.white
                     : const Color(0xFF1A1A1A),
                 fontWeight: FontWeight.w800,
@@ -510,9 +483,14 @@ class _RankRow extends StatelessWidget {
 
 Color _courseColor(int courseNo) {
   const colors = [
-    Color(0xFFD4D4D4), Color(0xFF333333), Color(0xFFEF4444),
-    Color(0xFF3B82F6), Color(0xFFFBBF24), Color(0xFF22C55E),
+    Color(0xFFD4D4D4),
+    Color(0xFF333333),
+    Color(0xFFEF4444),
+    Color(0xFF3B82F6),
+    Color(0xFFFBBF24),
+    Color(0xFF22C55E),
   ];
-  return (courseNo >= 1 && courseNo <= 6) ? colors[courseNo - 1] : const Color(0xFF6B7280);
+  return (courseNo >= 1 && courseNo <= 6)
+      ? colors[courseNo - 1]
+      : const Color(0xFF6B7280);
 }
-

@@ -3,15 +3,21 @@ import 'dart:math' as math;
 import '../../models/race_entry.dart';
 import '../../models/odds.dart';
 import '../../models/prediction.dart';
+import '../../models/race_result.dart';
 
 class PredictionEngine {
+  static const modelVersion = 'heuristic-v2';
   static const _gradeScores = {'A1': 10.0, 'A2': 7.5, 'B1': 5.0, 'B2': 3.0};
   static const _courseScores = {1: 9.0, 2: 7.6, 3: 6.5, 4: 5.4, 5: 4.4, 6: 3.6};
-  static const _softmaxTemperature = 9.0;
+  static const _softmaxTemperature = 7.5;
 
-  static RacePrediction predict(List<RaceEntry> entries, {Odds? odds}) {
+  static RacePrediction predict(
+    List<RaceEntry> entries, {
+    Odds? odds,
+    RaceConditions? conditions,
+  }) {
     if (entries.isEmpty) {
-      return const RacePrediction(
+      return RacePrediction(
         rankings: [],
         confidence: 0,
         winPicks: [],
@@ -48,12 +54,93 @@ class PredictionEngine {
 
     return RacePrediction(
       rankings: rankings,
-      confidence: _calcConfidence(rankings),
+      confidence: _calcConfidence(rankings, conditions),
       winPicks: _generateWinPicks(rankings),
       placePicks: _generatePlacePicks(rankings),
       quinellaPicks: _generateQuinellaPicks(rankings),
-      analysis: _generateAnalysis(rankings),
+      analysis: _generateAnalysis(rankings, conditions),
+      modelVersion: modelVersion,
     );
+  }
+
+  static RacePrediction restore({
+    required List<RacerPrediction> rankings,
+    required double confidence,
+    required String analysis,
+    required String modelVersion,
+    required DateTime predictedAt,
+  }) {
+    return RacePrediction(
+      rankings: rankings,
+      confidence: confidence,
+      winPicks: _generateWinPicks(rankings),
+      placePicks: _generatePlacePicks(rankings),
+      quinellaPicks: _generateQuinellaPicks(rankings),
+      analysis: analysis,
+      modelVersion: modelVersion,
+      predictedAt: predictedAt,
+    );
+  }
+
+  static PredictionEvaluation evaluate(
+    RacePrediction prediction,
+    RaceResult result,
+  ) {
+    final ranked = List<RacerPrediction>.from(prediction.rankings)
+      ..sort((a, b) => a.rank.compareTo(b.rank));
+    final predictedCourses = ranked.map((racer) => racer.courseNo).toList();
+    final actualCourses = [result.firstNo, result.secondNo, result.thirdNo];
+
+    var orderedHits = 0;
+    for (
+      var index = 0;
+      index < 3 &&
+          index < predictedCourses.length &&
+          index < actualCourses.length;
+      index++
+    ) {
+      if (predictedCourses[index] == actualCourses[index]) orderedHits++;
+    }
+
+    final actualTop3 = actualCourses.where((course) => course > 0).toSet();
+    final unorderedHits = predictedCourses
+        .take(3)
+        .where(actualTop3.contains)
+        .length;
+    final actualTop2 = {result.firstNo, result.secondNo};
+    final placeCombinations = <Set<int>>[
+      if (predictedCourses.length >= 2)
+        {predictedCourses[0], predictedCourses[1]},
+      if (predictedCourses.length >= 3)
+        {predictedCourses[0], predictedCourses[2]},
+    ];
+    final exactaCombinations = <(int, int)>[
+      if (predictedCourses.length >= 2)
+        (predictedCourses[0], predictedCourses[1]),
+      if (predictedCourses.length >= 3)
+        (predictedCourses[0], predictedCourses[2]),
+    ];
+
+    return PredictionEvaluation(
+      winHit: predictedCourses.take(2).contains(result.firstNo),
+      placeHit:
+          actualTop2.length == 2 &&
+          placeCombinations.any(
+            (combination) =>
+                combination.length == 2 && combination.containsAll(actualTop2),
+          ),
+      quinellaHit: exactaCombinations.any(
+        (combination) =>
+            combination.$1 == result.firstNo &&
+            combination.$2 == result.secondNo,
+      ),
+      orderedTop3Hits: orderedHits,
+      unorderedTop3Hits: unorderedHits,
+    );
+  }
+
+  static double comprehensiveScore(RaceEntry entry, List<RaceEntry> all) {
+    return _scoreRacer(entry, all, null).totalScore;
   }
 
   static RacerPrediction _scoreRacer(
@@ -65,21 +152,29 @@ class PredictionEngine {
     final avgScore = e.avgScore > 0
         ? e.avgScore.clamp(0, 10).toDouble()
         : gradeScore * 0.75;
-    final recentScore = _recentScore(e.recent3Wins);
+    final recentScore = _recentScore(e.recentWinCount);
+    final winRateScore = (e.winRate / 10).clamp(0.0, 10.0);
     final courseScore = _courseScores[e.courseNo] ?? 4.0;
     final weightScore = _weightScore(e, all);
+    final startScore = _startScore(e.avgStartTime);
+    final boatScore = _rateScore(e.boatWinRate);
+    final motorScore = _rateScore(e.motorWinRate);
     final marketScore = marketProbability == null
         ? null
         : (marketProbability * 10).clamp(0.0, 10.0);
 
     var total =
-        gradeScore * 3.0 +
-        avgScore * 2.6 +
-        recentScore * 1.8 +
-        courseScore * 1.7 +
-        weightScore * 0.7;
+        gradeScore * 2.0 +
+        avgScore * 2.4 +
+        winRateScore * 2.2 +
+        recentScore * 0.6 +
+        courseScore * 1.6 +
+        weightScore * 0.4;
+    if (startScore != null) total += startScore * 1.4;
+    if (boatScore != null) total += boatScore * 0.6;
+    if (motorScore != null) total += motorScore * 0.9;
     if (marketScore != null) {
-      total = total * 0.82 + marketScore * 6.0;
+      total += marketScore * 2.0;
     }
 
     return RacerPrediction(
@@ -93,9 +188,13 @@ class PredictionEngine {
       factors: {
         '등급': gradeScore,
         '평균득점': avgScore,
-        '최근 전적': recentScore,
+        '승률': winRateScore,
+        if (e.recentWinCount > 0) '최근 우승': recentScore,
         '코스': courseScore,
         if (e.weight != null) '체중': weightScore,
+        if (startScore != null) '평균 ST': startScore,
+        if (boatScore != null) '보트': boatScore,
+        if (motorScore != null) '모터': motorScore,
         if (marketScore != null) '배당': marketScore,
       },
     );
@@ -103,8 +202,17 @@ class PredictionEngine {
 
   static double _recentScore(int recent3Wins) {
     if (recent3Wins <= 0) return 0;
-    if (recent3Wins <= 3) return (recent3Wins / 3 * 10).clamp(0.0, 10.0);
-    return (recent3Wins / 100 * 10).clamp(0.0, 10.0);
+    return (recent3Wins / 3 * 10).clamp(0.0, 10.0);
+  }
+
+  static double? _startScore(double? averageStartTime) {
+    if (averageStartTime == null || averageStartTime <= 0) return null;
+    return ((0.4 - averageStartTime) / 0.3 * 10).clamp(0.0, 10.0);
+  }
+
+  static double? _rateScore(double? rate) {
+    if (rate == null || rate <= 0) return null;
+    return (rate / 10).clamp(0.0, 10.0);
   }
 
   static double _weightScore(RaceEntry entry, List<RaceEntry> all) {
@@ -122,12 +230,14 @@ class PredictionEngine {
 
   static Map<int, double> _marketProbabilities(Odds? odds) {
     final winOdds = odds?.win ?? const <int, double>{};
+    final validOdds = winOdds.entries
+        .where((entry) => entry.key >= 1 && entry.key <= 6 && entry.value > 1)
+        .toList();
+    if (validOdds.length < 4) return const {};
     final implied = <int, double>{};
 
-    for (final entry in winOdds.entries) {
-      if (entry.value > 1.0) {
-        implied[entry.key] = 1 / entry.value;
-      }
+    for (final entry in validOdds) {
+      implied[entry.key] = 1 / entry.value;
     }
 
     final total = implied.values.fold<double>(0, (sum, value) => sum + value);
@@ -161,12 +271,19 @@ class PredictionEngine {
     );
   }
 
-  static double _calcConfidence(List<RacerPrediction> rankings) {
+  static double _calcConfidence(
+    List<RacerPrediction> rankings,
+    RaceConditions? conditions,
+  ) {
     if (rankings.length < 2) return 50;
     final gap = rankings[0].totalScore - rankings[1].totalScore;
     final avg =
         rankings.fold<double>(0, (s, r) => s + r.totalScore) / rankings.length;
-    return (50 + (gap / avg) * 80).clamp(30, 85);
+    var confidence = 50 + (gap / avg) * 80;
+    final windPenalty = ((conditions?.windSpeed ?? 0) * 1.5).clamp(0, 12);
+    final rainPenalty = (conditions?.precipitation ?? 0) > 0 ? 5 : 0;
+    confidence -= windPenalty + rainPenalty;
+    return confidence.clamp(25, 85);
   }
 
   static List<BettingPick> _generateWinPicks(List<RacerPrediction> rankings) {
@@ -227,7 +344,10 @@ class PredictionEngine {
     ];
   }
 
-  static String _generateAnalysis(List<RacerPrediction> rankings) {
+  static String _generateAnalysis(
+    List<RacerPrediction> rankings,
+    RaceConditions? conditions,
+  ) {
     if (rankings.isEmpty) return '';
     final top = rankings.first;
     final buf = StringBuffer();
@@ -253,6 +373,11 @@ class PredictionEngine {
       buf.write(
         '인코스(${innerCourse.first.courseNo}코스) 선수가 유리한 위치에 있어 선행 유리 전개가 예상됩니다.',
       );
+    }
+    if (conditions?.isAdverse == true) {
+      buf.writeln();
+      buf.writeln();
+      buf.write('강풍 또는 강수로 변수가 커 신뢰도를 보수적으로 조정했습니다.');
     }
 
     return buf.toString();

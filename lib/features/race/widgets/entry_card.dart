@@ -21,14 +21,12 @@ Color _gradeColor(String grade) {
 /// 출주표 한 줄 카드 (경정)
 class EntryCard extends ConsumerWidget {
   final RaceEntry entry;
-  final int? popularityRank;
   final int? comprehensiveRank;
   final Widget? trailing;
 
   const EntryCard({
     super.key,
     required this.entry,
-    this.popularityRank,
     this.comprehensiveRank,
     this.trailing,
   });
@@ -89,7 +87,9 @@ class EntryCard extends ConsumerWidget {
                                 fontWeight: FontWeight.w700,
                                 color: _kPrimary,
                                 decoration: TextDecoration.underline,
-                                decorationColor: _kPrimary.withValues(alpha: 0.5),
+                                decorationColor: _kPrimary.withValues(
+                                  alpha: 0.5,
+                                ),
                               ),
                             ),
                           ),
@@ -99,10 +99,13 @@ class EntryCard extends ConsumerWidget {
                     ),
                     const SizedBox(height: 6),
                     Text(
-                      '평균득점 ${entry.avgScore.toStringAsFixed(2)} · 승률 ${entry.recent3Wins}%',
+                      '평균득점 ${entry.avgScore.toStringAsFixed(2)} · '
+                      '승률 ${entry.winRate.toStringAsFixed(1)}%',
                       style: GoogleFonts.notoSansKr(
                         fontSize: 12,
-                        color: theme.colorScheme.onSurface.withValues(alpha: 0.75),
+                        color: theme.colorScheme.onSurface.withValues(
+                          alpha: 0.75,
+                        ),
                       ),
                     ),
                     const SizedBox(height: 8),
@@ -112,11 +115,15 @@ class EntryCard extends ConsumerWidget {
                       children: [
                         _InfoChip(
                           icon: Icons.directions_boat_outlined,
-                          label: entry.boatNo != null ? '보트 ${entry.boatNo}' : '보트 —',
+                          label: entry.boatNo != null
+                              ? '보트 ${entry.boatNo}'
+                              : '보트 —',
                         ),
                         _InfoChip(
                           icon: Icons.settings_outlined,
-                          label: entry.motorNo != null ? '모터 ${entry.motorNo}' : '모터 —',
+                          label: entry.motorNo != null
+                              ? '모터 ${entry.motorNo}'
+                              : '모터 —',
                         ),
                         if (entry.weight != null)
                           _InfoChip(
@@ -128,13 +135,14 @@ class EntryCard extends ConsumerWidget {
                   ],
                 ),
               ),
-              if (popularityRank != null || comprehensiveRank != null || trailing != null) ...[
+              if (comprehensiveRank != null || trailing != null) ...[
                 const SizedBox(width: 8),
-                if (popularityRank != null)
-                  _RankMini(label: '인기', rank: popularityRank!, color: const Color(0xFFFBBF24)),
                 if (comprehensiveRank != null) ...[
-                  if (popularityRank != null) const SizedBox(width: 6),
-                  _RankMini(label: '종합', rank: comprehensiveRank!, color: _kPrimary),
+                  _RankMini(
+                    label: '종합',
+                    rank: comprehensiveRank!,
+                    color: _kPrimary,
+                  ),
                 ],
                 if (trailing != null) trailing!,
               ],
@@ -147,7 +155,11 @@ class EntryCard extends ConsumerWidget {
 }
 
 class _RankMini extends StatelessWidget {
-  const _RankMini({required this.label, required this.rank, required this.color});
+  const _RankMini({
+    required this.label,
+    required this.rank,
+    required this.color,
+  });
 
   final String label;
   final int rank;
@@ -158,8 +170,18 @@ class _RankMini extends StatelessWidget {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Text(label, style: TextStyle(fontSize: 10, color: color.withValues(alpha: 0.9))),
-        Text('$rank', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: color)),
+        Text(
+          label,
+          style: TextStyle(fontSize: 10, color: color.withValues(alpha: 0.9)),
+        ),
+        Text(
+          '$rank',
+          style: TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.w800,
+            color: color,
+          ),
+        ),
       ],
     );
   }
@@ -196,23 +218,26 @@ class _InfoChip extends StatelessWidget {
   final IconData icon;
   final String label;
 
-  const _InfoChip({
-    required this.icon,
-    required this.label,
-  });
+  const _InfoChip({required this.icon, required this.label});
 
   @override
   Widget build(BuildContext context) {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Icon(icon, size: 14, color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.5)),
+        Icon(
+          icon,
+          size: 14,
+          color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.5),
+        ),
         const SizedBox(width: 4),
         Text(
           label,
           style: GoogleFonts.notoSansKr(
             fontSize: 11,
-            color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.65),
+            color: Theme.of(
+              context,
+            ).colorScheme.onSurface.withValues(alpha: 0.65),
           ),
         ),
       ],

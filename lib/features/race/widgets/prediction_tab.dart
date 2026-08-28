@@ -24,8 +24,10 @@ Color _factorColor(String key) {
   return switch (key) {
     '등급' => Colors.red.shade300,
     '평균득점' => Colors.blue.shade300,
-    '최근 전적' => Colors.green.shade300,
+    '승률' || '최근 우승' => Colors.green.shade300,
     '코스' => Colors.purple.shade300,
+    '평균 ST' => Colors.cyan.shade300,
+    '모터' || '보트' => Colors.orange.shade300,
     '체중' => Colors.teal.shade300,
     '배당' => Colors.amber.shade300,
     _ => Colors.grey.shade500,
@@ -239,7 +241,7 @@ class _PaywallPlanTile extends StatelessWidget {
   }
 }
 
-class _PredictionLoadedBody extends StatelessWidget {
+class _PredictionLoadedBody extends ConsumerWidget {
   const _PredictionLoadedBody({
     required this.prediction,
     required this.date,
@@ -251,7 +253,7 @@ class _PredictionLoadedBody extends StatelessWidget {
   final int raceNo;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
     final sorted = List<RacerPrediction>.from(prediction.rankings)
       ..sort((a, b) => a.rank.compareTo(b.rank));
@@ -281,6 +283,16 @@ class _PredictionLoadedBody extends StatelessWidget {
             const SizedBox(height: 6),
           ],
           _ConfidenceGauge(confidence: prediction.confidence),
+          const SizedBox(height: 12),
+          _SnapshotInfo(prediction: prediction),
+          const SizedBox(height: 12),
+          ref
+              .watch(predictionStatsProvider)
+              .when(
+                data: (stats) => _PerformanceCard(stats: stats),
+                loading: () => const SizedBox.shrink(),
+                error: (_, __) => const SizedBox.shrink(),
+              ),
           const SizedBox(height: 20),
           Text(
             '전체 순위',
@@ -333,6 +345,73 @@ class _PredictionLoadedBody extends StatelessWidget {
             label: Text(
               '경주 결과 보기',
               style: GoogleFonts.notoSansKr(fontWeight: FontWeight.w600),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SnapshotInfo extends StatelessWidget {
+  const _SnapshotInfo({required this.prediction});
+
+  final RacePrediction prediction;
+
+  @override
+  Widget build(BuildContext context) {
+    final local = prediction.predictedAt.toLocal();
+    final timestamp =
+        '${local.year}.${local.month.toString().padLeft(2, '0')}.'
+        '${local.day.toString().padLeft(2, '0')} '
+        '${local.hour.toString().padLeft(2, '0')}:'
+        '${local.minute.toString().padLeft(2, '0')}';
+    return Text(
+      '${prediction.modelVersion} · $timestamp 경기 전 스냅샷',
+      textAlign: TextAlign.center,
+      style: GoogleFonts.notoSansKr(color: Colors.white54, fontSize: 11),
+    );
+  }
+}
+
+class _PerformanceCard extends StatelessWidget {
+  const _PerformanceCard({required this.stats});
+
+  final PredictionStats stats;
+
+  @override
+  Widget build(BuildContext context) {
+    if (stats.raceCount == 0) {
+      return const SizedBox.shrink();
+    }
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFF161B22),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFF30363D)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            '검증된 ${stats.raceCount}경기 성능',
+            style: GoogleFonts.notoSansKr(
+              color: Colors.white,
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            '단승 ${stats.winHitRate.toStringAsFixed(1)}% · '
+            '복승 ${stats.placeHitRate.toStringAsFixed(1)}% · '
+            '쌍승 ${stats.quinellaHitRate.toStringAsFixed(1)}% · '
+            'TOP3 순서 적중 ${stats.orderedTop3HitRate.toStringAsFixed(1)}%',
+            style: GoogleFonts.notoSansKr(
+              color: Colors.white70,
+              fontSize: 11,
+              height: 1.4,
             ),
           ),
         ],

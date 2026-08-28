@@ -69,3 +69,10 @@ android {
 flutter {
     source = "../.."
 }
+
+dependencies {
+    // in_app_purchase_android 0.5.3은 Play Billing 8.0.0에 고정되어 있다.
+    // Google Play 정책상 8.0.0 이상이 필수이며 9.x가 권장되므로 앱 모듈에서 상향한다.
+    // PBL 9.x는 8.x 대비 제거된 API가 없어 플러그인과 바이너리 호환된다.
+    implementation("com.android.billingclient:billing:9.1.0")
+}

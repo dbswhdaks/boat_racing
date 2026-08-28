@@ -3,6 +3,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../models/race.dart';
 import '../../models/race_entry.dart';
 import '../../models/prediction.dart';
+import 'prediction_engine.dart';
 
 class SupabaseBackupService {
   SupabaseClient get _client => Supabase.instance.client;
@@ -13,16 +14,18 @@ class SupabaseBackupService {
     if (races.isEmpty) return;
     try {
       final rows = races
-          .map((r) => {
-                'meet': r.venueCode.toString(),
-                'race_date': r.date,
-                'race_no': r.raceNo,
-                'venue_name': r.venueName,
-                'distance': r.distance,
-                'status': r.status,
-                'departure_time': r.departureTime,
-                'racer_count': r.racerCount,
-              })
+          .map(
+            (r) => {
+              'meet': r.venueCode.toString(),
+              'race_date': r.date,
+              'race_no': r.raceNo,
+              'venue_name': r.venueName,
+              'distance': r.distance,
+              'status': r.status,
+              'departure_time': r.departureTime,
+              'racer_count': r.racerCount,
+            },
+          )
           .toList();
       await _client
           .from('boat_races')
@@ -86,6 +89,10 @@ class SupabaseBackupService {
       await _client.from('boat_races').delete().eq('race_date', date);
       await _client.from('boat_entries').delete().eq('race_date', date);
       await _client.from('boat_predictions').delete().eq('race_date', date);
+      await _client
+          .from('boat_prediction_evaluations')
+          .delete()
+          .eq('race_date', date);
       if (kDebugMode) debugPrint('[Supabase] $date 캐시 전체 삭제 완료');
     } catch (e) {
       if (kDebugMode) debugPrint('[Supabase] 캐시 삭제 실패: $e');
@@ -102,20 +109,27 @@ class SupabaseBackupService {
     if (entries.isEmpty) return;
     try {
       final rows = entries
-          .map((e) => {
-                'meet': '1',
-                'race_date': date,
-                'race_no': raceNo,
-                'course_no': e.courseNo,
-                'racer_name': e.racerName,
-                'racer_id': e.racerId,
-                'grade': e.grade,
-                'avg_score': e.avgScore,
-                'recent3_wins': e.recent3Wins,
-                'boat_no': e.boatNo,
-                'motor_no': e.motorNo,
-                'weight': e.weight,
-              })
+          .map(
+            (e) => {
+              'meet': '1',
+              'race_date': date,
+              'race_no': raceNo,
+              'course_no': e.courseNo,
+              'racer_name': e.racerName,
+              'racer_id': e.racerId,
+              'grade': e.grade,
+              'avg_score': e.avgScore,
+              'recent3_wins': e.recentWinCount,
+              'recent_win_count': e.recentWinCount,
+              'win_rate': e.winRate,
+              'boat_no': e.boatNo,
+              'motor_no': e.motorNo,
+              'weight': e.weight,
+              'avg_start_time': e.avgStartTime,
+              'boat_win_rate': e.boatWinRate,
+              'motor_win_rate': e.motorWinRate,
+            },
+          )
           .toList();
       await _client
           .from('boat_entries')
@@ -145,10 +159,17 @@ class SupabaseBackupService {
           racerId: row['racer_id'] as String,
           grade: row['grade'] as String,
           avgScore: (row['avg_score'] as num?)?.toDouble() ?? 0,
-          recent3Wins: (row['recent3_wins'] as int?) ?? 0,
+          recentWinCount:
+              (row['recent_win_count'] as num?)?.toInt() ??
+              (row['recent3_wins'] as num?)?.toInt() ??
+              0,
+          winRate: (row['win_rate'] as num?)?.toDouble() ?? 0,
           boatNo: row['boat_no'] as int?,
           motorNo: row['motor_no'] as int?,
           weight: (row['weight'] as num?)?.toDouble(),
+          avgStartTime: (row['avg_start_time'] as num?)?.toDouble(),
+          boatWinRate: (row['boat_win_rate'] as num?)?.toDouble(),
+          motorWinRate: (row['motor_win_rate'] as num?)?.toDouble(),
         );
       }).toList();
     } catch (e) {
@@ -159,30 +180,70 @@ class SupabaseBackupService {
 
   // ─── AI 예측 ───
 
+  Future<RaceConditions?> loadRaceConditions({
+    required String date,
+    required int raceNo,
+  }) async {
+    try {
+      final response = await _client
+          .from('race_weather')
+          .select('wsd,pcp')
+          .eq('race_date', date)
+          .eq('race_no', raceNo)
+          .limit(1)
+          .maybeSingle();
+      if (response == null) return null;
+      final precipitationText = response['pcp']?.toString() ?? '';
+      final precipitation = double.tryParse(
+        precipitationText.replaceAll(RegExp(r'[^0-9.]'), ''),
+      );
+      return RaceConditions(
+        windSpeed: (response['wsd'] as num?)?.toDouble(),
+        precipitation: precipitation,
+      );
+    } catch (e) {
+      if (kDebugMode) debugPrint('[Supabase] 경주 기상 조회 실패: $e');
+      return null;
+    }
+  }
+
   Future<void> savePrediction({
     required String date,
     required int raceNo,
     required RacePrediction prediction,
   }) async {
     try {
-      final rows = prediction.rankings.map((r) => {
-        'meet': '1',
-        'race_date': date,
-        'race_no': raceNo,
-        'racer_no': r.courseNo,
-        'racer_name': r.racerName,
-        'win_probability': r.winProb,
-        'place_probability': r.totalScore,
-        'rank': r.rank,
-        'total_score': r.totalScore,
-        'factors': r.factors,
-        'analysis': prediction.analysis,
-        'confidence': prediction.confidence,
-      }).toList();
+      final rows = prediction.rankings
+          .map(
+            (r) => {
+              'meet': '1',
+              'race_date': date,
+              'race_no': raceNo,
+              'racer_no': r.courseNo,
+              'racer_name': r.racerName,
+              'racer_id': r.racerId,
+              'grade': r.grade,
+              'win_probability': r.winProb,
+              'rank': r.rank,
+              'total_score': r.totalScore,
+              'factors': r.factors,
+              'analysis': prediction.analysis,
+              'confidence': prediction.confidence,
+              'model_version': prediction.modelVersion,
+              'predicted_at': prediction.predictedAt.toIso8601String(),
+            },
+          )
+          .toList();
       await _client
           .from('boat_predictions')
-          .upsert(rows, onConflict: 'meet,race_date,race_no,racer_no');
-      if (kDebugMode) debugPrint('[Supabase] boat_predictions ${rows.length}건 저장');
+          .upsert(
+            rows,
+            onConflict: 'meet,race_date,race_no,racer_no,model_version',
+            ignoreDuplicates: true,
+          );
+      if (kDebugMode) {
+        debugPrint('[Supabase] boat_predictions ${rows.length}건 저장');
+      }
     } catch (e) {
       if (kDebugMode) debugPrint('[Supabase] boat_predictions 저장 실패: $e');
     }
@@ -191,42 +252,129 @@ class SupabaseBackupService {
   Future<RacePrediction?> loadPrediction({
     required String date,
     required int raceNo,
+    String? modelVersion,
   }) async {
     try {
-      final res = await _client
+      var query = _client
           .from('boat_predictions')
           .select()
           .eq('race_date', date)
-          .eq('race_no', raceNo)
-          .order('rank');
+          .eq('race_no', raceNo);
+      if (modelVersion != null) {
+        query = query.eq('model_version', modelVersion);
+      }
+      final res = await query.order('rank');
       final rows = (res as List).cast<Map<String, dynamic>>();
       if (rows.isEmpty) return null;
 
-      final rankings = rows.map((r) => RacerPrediction(
-        courseNo: r['racer_no'] as int,
-        racerName: r['racer_name'] as String,
-        racerId: '',
-        grade: '',
-        winProb: (r['win_probability'] as num?)?.toDouble() ?? 0,
-        rank: (r['rank'] as int?) ?? 0,
-        totalScore: (r['total_score'] as num?)?.toDouble() ?? 0,
-        factors: r['factors'] != null
-            ? Map<String, double>.from(
-                (r['factors'] as Map).map((k, v) => MapEntry(k.toString(), (v as num).toDouble())))
-            : const {},
-      )).toList();
+      final rankings = rows
+          .map(
+            (r) => RacerPrediction(
+              courseNo: r['racer_no'] as int,
+              racerName: r['racer_name'] as String,
+              racerId: (r['racer_id'] as String?) ?? '',
+              grade: (r['grade'] as String?) ?? '',
+              winProb: (r['win_probability'] as num?)?.toDouble() ?? 0,
+              rank: (r['rank'] as int?) ?? 0,
+              totalScore: (r['total_score'] as num?)?.toDouble() ?? 0,
+              factors: r['factors'] != null
+                  ? Map<String, double>.from(
+                      (r['factors'] as Map).map(
+                        (k, v) => MapEntry(k.toString(), (v as num).toDouble()),
+                      ),
+                    )
+                  : const {},
+            ),
+          )
+          .toList();
 
-      return RacePrediction(
+      return PredictionEngine.restore(
         rankings: rankings,
         confidence: (rows.first['confidence'] as num?)?.toDouble() ?? 0,
-        winPicks: const [],
-        placePicks: const [],
-        quinellaPicks: const [],
         analysis: (rows.first['analysis'] as String?) ?? '',
+        modelVersion:
+            (rows.first['model_version'] as String?) ?? 'heuristic-v1',
+        predictedAt:
+            DateTime.tryParse(rows.first['predicted_at']?.toString() ?? '') ??
+            DateTime.tryParse(rows.first['created_at']?.toString() ?? '') ??
+            DateTime.fromMillisecondsSinceEpoch(0, isUtc: true),
       );
     } catch (e) {
       if (kDebugMode) debugPrint('[Supabase] boat_predictions 조회 실패: $e');
       return null;
+    }
+  }
+
+  Future<void> savePredictionEvaluation({
+    required String date,
+    required int raceNo,
+    required RacePrediction prediction,
+    required PredictionEvaluation evaluation,
+  }) async {
+    try {
+      await _client.from('boat_prediction_evaluations').upsert({
+        'meet': '1',
+        'race_date': date,
+        'race_no': raceNo,
+        'model_version': prediction.modelVersion,
+        'predicted_at': prediction.predictedAt.toIso8601String(),
+        'win_hit': evaluation.winHit,
+        'place_hit': evaluation.placeHit,
+        'quinella_hit': evaluation.quinellaHit,
+        'ordered_top3_hits': evaluation.orderedTop3Hits,
+        'unordered_top3_hits': evaluation.unorderedTop3Hits,
+        'evaluated_at': DateTime.now().toUtc().toIso8601String(),
+      }, onConflict: 'meet,race_date,race_no,model_version');
+    } catch (e) {
+      if (kDebugMode) debugPrint('[Supabase] 예측 평가 저장 실패: $e');
+    }
+  }
+
+  Future<PredictionStats> loadPredictionStats({
+    String modelVersion = PredictionEngine.modelVersion,
+  }) async {
+    try {
+      final response = await _client
+          .from('boat_prediction_evaluations')
+          .select('win_hit,place_hit,quinella_hit,ordered_top3_hits')
+          .eq('model_version', modelVersion);
+      final rows = (response as List).cast<Map<String, dynamic>>();
+      if (rows.isEmpty) {
+        return const PredictionStats(
+          raceCount: 0,
+          winHits: 0,
+          placeHits: 0,
+          quinellaHits: 0,
+          orderedTop3HitRate: 0,
+        );
+      }
+
+      var winHits = 0;
+      var placeHits = 0;
+      var quinellaHits = 0;
+      var orderedHits = 0;
+      for (final row in rows) {
+        if (row['win_hit'] == true) winHits++;
+        if (row['place_hit'] == true) placeHits++;
+        if (row['quinella_hit'] == true) quinellaHits++;
+        orderedHits += (row['ordered_top3_hits'] as num?)?.toInt() ?? 0;
+      }
+      return PredictionStats(
+        raceCount: rows.length,
+        winHits: winHits,
+        placeHits: placeHits,
+        quinellaHits: quinellaHits,
+        orderedTop3HitRate: orderedHits / (rows.length * 3) * 100,
+      );
+    } catch (e) {
+      if (kDebugMode) debugPrint('[Supabase] 예측 통계 조회 실패: $e');
+      return const PredictionStats(
+        raceCount: 0,
+        winHits: 0,
+        placeHits: 0,
+        quinellaHits: 0,
+        orderedTop3HitRate: 0,
+      );
     }
   }
 }

@@ -95,18 +95,11 @@ class FirebaseService {
     }
   }
 
-  /// FCM 권한 요청 + 토큰 로깅 + 포그라운드 표시 옵션.
+  /// FCM 토큰 로깅 + 포그라운드 표시 옵션.
   /// 실제 알림 UI 노출(포그라운드)은 flutter_local_notifications 등으로
   /// 별도 처리하는 것이 일반적이다. 현재는 시스템 기본 동작을 사용한다.
   Future<void> _setupMessaging() async {
     try {
-      await messaging.requestPermission(
-        alert: true,
-        badge: true,
-        sound: true,
-        provisional: false,
-      );
-
       // iOS 포그라운드에서도 알림 배너/소리/배지 표시
       await messaging.setForegroundNotificationPresentationOptions(
         alert: true,

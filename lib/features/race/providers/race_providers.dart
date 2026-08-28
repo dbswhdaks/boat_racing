@@ -285,8 +285,14 @@ final oddsProvider = FutureProvider.family<Odds, ({String date, int raceNo})>((
   ref,
   params,
 ) async {
-  ref.keepAlive();
   final api = ref.watch(boatRacingApiProvider);
+  final kboat = ref.watch(kboatScraperProvider);
+  final kboatOdds = await kboat.fetchFinalOdds(
+    date: params.date,
+    raceNo: params.raceNo,
+  );
+  if (!kboatOdds.isEmpty) return kboatOdds;
+
   final result = await api.fetchPayoff(date: params.date, rcNo: params.raceNo);
   if (result.isSuccess && result.data != null) return result.data!;
   return const Odds();
@@ -411,7 +417,27 @@ final predictionProvider =
       ref,
       params,
     ) async {
+      ref.keepAlive();
       final backup = ref.watch(supabaseBackupProvider);
+      final api = ref.watch(boatRacingApiProvider);
+      final currentSnapshot = await backup.loadPrediction(
+        date: params.date,
+        raceNo: params.raceNo,
+        modelVersion: PredictionEngine.modelVersion,
+      );
+      if (currentSnapshot != null) return currentSnapshot;
+
+      final legacySnapshot = await backup.loadPrediction(
+        date: params.date,
+        raceNo: params.raceNo,
+      );
+      if (_isPredictionLocked(params.date, params.raceNo) &&
+          legacySnapshot != null) {
+        return legacySnapshot;
+      }
+
+      final predictionYear =
+          int.tryParse(params.date.substring(0, 4)) ?? DateTime.now().year;
       final results = await Future.wait([
         ref.watch(
           raceEntriesProvider((
@@ -422,21 +448,123 @@ final predictionProvider =
         ref.watch(
           oddsProvider((date: params.date, raceNo: params.raceNo)).future,
         ),
+        api.fetchBoatWinRates(year: predictionYear),
+        api.fetchMotorWinRates(year: predictionYear),
+        backup.loadRaceConditions(date: params.date, raceNo: params.raceNo),
       ]);
 
       final entriesResult = results[0] as DataWithSource<List<RaceEntry>>;
       final odds = results[1] as Odds;
-      final prediction = PredictionEngine.predict(
+      final boatWinRates = results[2] as Map<int, double>;
+      final motorWinRates = results[3] as Map<int, double>;
+      final conditions = results[4] as RaceConditions?;
+      final enrichedEntries = await _enrichPredictionEntries(
+        api,
         entriesResult.data,
-        odds: odds,
+        params.date,
+        boatWinRates: boatWinRates,
+        motorWinRates: motorWinRates,
       );
-      backup.savePrediction(
+      backup.saveEntries(
+        date: params.date,
+        raceNo: params.raceNo,
+        entries: enrichedEntries,
+      );
+      final prediction = PredictionEngine.predict(
+        enrichedEntries,
+        odds: odds,
+        conditions: conditions,
+      );
+      await backup.savePrediction(
         date: params.date,
         raceNo: params.raceNo,
         prediction: prediction,
       );
       return prediction;
     });
+
+Future<List<RaceEntry>> _enrichPredictionEntries(
+  BoatRacingApiService api,
+  List<RaceEntry> entries,
+  String date, {
+  required Map<int, double> boatWinRates,
+  required Map<int, double> motorWinRates,
+}) async {
+  final year = date.length >= 4 ? int.tryParse(date.substring(0, 4)) : null;
+  return Future.wait(
+    entries.map((entry) async {
+      final equippedEntry = entry.copyWith(
+        boatWinRate: entry.boatNo == null ? null : boatWinRates[entry.boatNo],
+        motorWinRate: entry.motorNo == null
+            ? null
+            : motorWinRates[entry.motorNo],
+      );
+      try {
+        final result = await api.fetchRacerInfo(
+          racerName: entry.racerName,
+          year: year,
+        );
+        if (!result.isSuccess || result.data == null) return equippedEntry;
+        final detail = RacerDetail.fromApiMap(
+          result.data!,
+          entry: equippedEntry,
+        );
+        return equippedEntry.copyWith(
+          avgScore: detail.avgScore > 0 ? detail.avgScore : null,
+          winRate: (detail.winRatio ?? detail.winRate) > 0
+              ? detail.winRatio ?? detail.winRate
+              : null,
+          avgStartTime: detail.avgStartTime,
+        );
+      } catch (_) {
+        return equippedEntry;
+      }
+    }),
+  );
+}
+
+bool _isPredictionLocked(String date, int raceNo) {
+  if (date.length != 8) return false;
+  final year = int.tryParse(date.substring(0, 4));
+  final month = int.tryParse(date.substring(4, 6));
+  final day = int.tryParse(date.substring(6, 8));
+  if (year == null || month == null || day == null) return false;
+  final departure = Race.defaultDepartureTimes[raceNo];
+  if (departure == null) return false;
+  final parts = departure.split(':');
+  if (parts.length != 2) return false;
+  final hour = int.tryParse(parts[0]);
+  final minute = int.tryParse(parts[1]);
+  if (hour == null || minute == null) return false;
+  return DateTime.now().isAfter(DateTime(year, month, day, hour, minute));
+}
+
+final predictionEvaluationProvider =
+    FutureProvider.family<PredictionEvaluation, ({String date, int raceNo})>((
+      ref,
+      params,
+    ) async {
+      final backup = ref.watch(supabaseBackupProvider);
+      final values = await Future.wait([
+        ref.watch(predictionProvider(params).future),
+        ref.watch(raceResultProvider(params).future),
+      ]);
+      final prediction = values[0] as RacePrediction;
+      final result = values[1] as RaceResult;
+      final evaluation = PredictionEngine.evaluate(prediction, result);
+      await backup.savePredictionEvaluation(
+        date: params.date,
+        raceNo: params.raceNo,
+        prediction: prediction,
+        evaluation: evaluation,
+      );
+      ref.invalidate(predictionStatsProvider);
+      return evaluation;
+    });
+
+final predictionStatsProvider = FutureProvider<PredictionStats>((ref) {
+  return ref.watch(supabaseBackupProvider).loadPredictionStats();
+});
 
 Future<RacerDetail> _enrichRacerDetail(
   BoatRacingApiService api,

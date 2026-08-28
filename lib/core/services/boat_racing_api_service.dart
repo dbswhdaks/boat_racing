@@ -63,11 +63,15 @@ class BoatRacingApiService {
 
   // ─── RACE_DOC (출주표 정보 - race_ymd 포함, 핵심 데이터 소스) ───
 
-  Future<List<Map<String, dynamic>>> fetchAllRaceDoc({required int year}) async {
+  Future<List<Map<String, dynamic>>> fetchAllRaceDoc({
+    required int year,
+  }) async {
     final key = '$year';
     if (_raceDocCache.containsKey(key)) return _raceDocCache[key]!;
 
-    final items = await _fetchPages(ApiConstants.raceDoc, {'stnd_yr': year.toString()});
+    final items = await _fetchPages(ApiConstants.raceDoc, {
+      'stnd_yr': year.toString(),
+    });
     _raceDocCache[key] = items;
 
     for (final item in items) {
@@ -92,11 +96,15 @@ class BoatRacingApiService {
 
   // ─── RACE_INFO (상세 출주표 - 보조 소스) ───
 
-  Future<List<Map<String, dynamic>>> fetchAllRaceInfo({required int year}) async {
+  Future<List<Map<String, dynamic>>> fetchAllRaceInfo({
+    required int year,
+  }) async {
     final key = '$year';
     if (_raceInfoCache.containsKey(key)) return _raceInfoCache[key]!;
 
-    final items = await _fetchPages(ApiConstants.raceInfo, {'stnd_yr': year.toString()});
+    final items = await _fetchPages(ApiConstants.raceInfo, {
+      'stnd_yr': year.toString(),
+    });
     _raceInfoCache[key] = items;
     _loadedYears.add(year);
     return items;
@@ -104,11 +112,15 @@ class BoatRacingApiService {
 
   // ─── RACE_RESULT (경주결과 - 연간 전체 로드 후 필터) ───
 
-  Future<List<Map<String, dynamic>>> _fetchAllRaceResult({required int year}) async {
+  Future<List<Map<String, dynamic>>> _fetchAllRaceResult({
+    required int year,
+  }) async {
     final key = '$year';
     if (_raceResultCache.containsKey(key)) return _raceResultCache[key]!;
 
-    final items = await _fetchPages(ApiConstants.raceResult, {'stnd_yr': year.toString()});
+    final items = await _fetchPages(ApiConstants.raceResult, {
+      'stnd_yr': year.toString(),
+    });
     _raceResultCache[key] = items;
     return items;
   }
@@ -118,7 +130,10 @@ class BoatRacingApiService {
     Map<String, dynamic> extraParams, {
     int rowsPerPage = 1000,
   }) async {
-    final firstParams = {..._baseParams(pageNo: 1, numOfRows: rowsPerPage), ...extraParams};
+    final firstParams = {
+      ..._baseParams(pageNo: 1, numOfRows: rowsPerPage),
+      ...extraParams,
+    };
     final firstRes = await _dio.get(url, queryParameters: firstParams);
     final firstError = _checkApiError(firstRes.data);
     if (firstError != null) return [];
@@ -142,7 +157,10 @@ class BoatRacingApiService {
       final end = (start + chunkSize - 1).clamp(start, totalPages);
       final futures = <Future<Response>>[];
       for (int page = start; page <= end; page++) {
-        final params = {..._baseParams(pageNo: page, numOfRows: rowsPerPage), ...extraParams};
+        final params = {
+          ..._baseParams(pageNo: page, numOfRows: rowsPerPage),
+          ...extraParams,
+        };
         futures.add(_dio.get(url, queryParameters: params));
       }
       final responses = await Future.wait(futures, eagerError: false);
@@ -291,17 +309,21 @@ class BoatRacingApiService {
   // ─── 배당률 (연간 전체 → race_ymd + race_no 필터) ───
 
   final Map<String, List<Map<String, dynamic>>> _payoffCache = {};
+  final Map<int, Map<int, double>> _boatWinRateCache = {};
+  final Map<int, Map<int, double>> _motorWinRateCache = {};
   Future<void>? _payoffPreWarmFuture;
 
   void preWarmPayoffCache({required int year}) {
     final key = '$year';
     if (_payoffCache.containsKey(key)) return;
-    _payoffPreWarmFuture ??= _fetchPages(ApiConstants.payoff, {'stnd_yr': key}).then((items) {
-      _payoffCache[key] = items;
-      _payoffPreWarmFuture = null;
-    }).catchError((_) {
-      _payoffPreWarmFuture = null;
-    });
+    _payoffPreWarmFuture ??= _fetchPages(ApiConstants.payoff, {'stnd_yr': key})
+        .then((items) {
+          _payoffCache[key] = items;
+          _payoffPreWarmFuture = null;
+        })
+        .catchError((_) {
+          _payoffPreWarmFuture = null;
+        });
   }
 
   Future<ApiResult<Odds>> fetchPayoff({
@@ -315,7 +337,9 @@ class BoatRacingApiService {
           await _payoffPreWarmFuture;
         }
         if (!_payoffCache.containsKey(year)) {
-          final items = await _fetchPages(ApiConstants.payoff, {'stnd_yr': year});
+          final items = await _fetchPages(ApiConstants.payoff, {
+            'stnd_yr': year,
+          });
           _payoffCache[year] = items;
         }
       }
@@ -336,6 +360,71 @@ class BoatRacingApiService {
     }
   }
 
+  Future<Map<int, double>> fetchBoatWinRates({required int year}) async {
+    final cached = _boatWinRateCache[year];
+    if (cached != null) return cached;
+    try {
+      final items = await _fetchPages(ApiConstants.boatInfo, {
+        'stnd_yr': year.toString(),
+      });
+      final rates = _equipmentWinRates(items, ['boat_no']);
+      _boatWinRateCache[year] = rates;
+      return rates;
+    } catch (_) {
+      return const {};
+    }
+  }
+
+  Future<Map<int, double>> fetchMotorWinRates({required int year}) async {
+    final cached = _motorWinRateCache[year];
+    if (cached != null) return cached;
+    try {
+      final items = await _fetchPages(ApiConstants.motorInfo, {
+        'stnd_yr': year.toString(),
+      });
+      final rates = _equipmentWinRates(items, ['motor_no', 'moter_no']);
+      _motorWinRateCache[year] = rates;
+      return rates;
+    } catch (_) {
+      return const {};
+    }
+  }
+
+  Map<int, double> _equipmentWinRates(
+    List<Map<String, dynamic>> items,
+    List<String> numberKeys,
+  ) {
+    final rates = <int, double>{};
+    for (final item in items) {
+      final number = _intFrom(item, numberKeys);
+      if (number == null || number <= 0) continue;
+      final providedRate = _doubleFrom(item, [
+        'win_ratio',
+        'win_rate',
+        'rank1_ratio',
+      ]);
+      final raceCount = _intFrom(item, [
+        'race_tcnt',
+        'race_count',
+        'entry_tcnt',
+      ]);
+      final winCount = _intFrom(item, [
+        'rank1_tcnt',
+        'win_tcnt',
+        'rank1_count',
+      ]);
+      final calculatedRate =
+          raceCount != null && raceCount > 0 && winCount != null
+          ? winCount / raceCount * 100
+          : null;
+      final rate = providedRate ?? calculatedRate;
+      if (rate != null && rate >= 0 && rate <= 100) {
+        rates[number] = rate;
+      }
+    }
+    return rates;
+  }
+
   // ─── 경주순위 (RACE_RANK: race_day 필드로 필터) ───
 
   Future<ApiResult<List<Map<String, dynamic>>>> fetchRaceRank({
@@ -348,12 +437,17 @@ class BoatRacingApiService {
         'stnd_year': date.substring(0, 4),
         'race_day': date,
       };
-      final res = await _dio.get(ApiConstants.raceRank, queryParameters: params);
+      final res = await _dio.get(
+        ApiConstants.raceRank,
+        queryParameters: params,
+      );
       final error = _checkApiError(res.data);
       if (error != null) return ApiResult.failure(error);
 
       final items = _extractItems(res.data);
-      final all = items.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+      final all = items
+          .map((e) => Map<String, dynamic>.from(e as Map))
+          .toList();
       final matched = all.where((m) {
         final rd = m['race_day']?.toString() ?? '';
         final rn = int.tryParse(m['race_no']?.toString() ?? '') ?? 0;
@@ -390,7 +484,10 @@ class BoatRacingApiService {
         'stnd_yr': targetYear.toString(),
         'racer_nm': racerName,
       };
-      final res = await _dio.get(ApiConstants.racerInfo, queryParameters: params);
+      final res = await _dio.get(
+        ApiConstants.racerInfo,
+        queryParameters: params,
+      );
       final error = _checkApiError(res.data);
       if (error != null && year != null) return ApiResult.failure(error);
 
@@ -438,11 +535,16 @@ class BoatRacingApiService {
         'stnd_yr': targetYear.toString(),
         'racer_nm': racerName,
       };
-      final res = await _dio.get(ApiConstants.racerTmsInfo, queryParameters: params);
+      final res = await _dio.get(
+        ApiConstants.racerTmsInfo,
+        queryParameters: params,
+      );
       final error = _checkApiError(res.data);
       if (error != null) return ApiResult.failure(error);
       final items = _extractItems(res.data);
-      final result = items.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+      final result = items
+          .map((e) => Map<String, dynamic>.from(e as Map))
+          .toList();
       return ApiResult.success(result);
     } on DioException catch (e) {
       return ApiResult.failure(_dioErrorMsg(e));
@@ -464,7 +566,10 @@ class BoatRacingApiService {
         'stnd_year': targetYear.toString(),
         'racer_nm': racerName,
       };
-      final res = await _dio.get(ApiConstants.racerStrt, queryParameters: params);
+      final res = await _dio.get(
+        ApiConstants.racerStrt,
+        queryParameters: params,
+      );
       final error = _checkApiError(res.data);
       if (error != null) return ApiResult.failure(error);
       final items = _extractItems(res.data);
@@ -492,11 +597,16 @@ class BoatRacingApiService {
         'stnd_year': targetYear.toString(),
         'racer_nm': racerName,
       };
-      final res = await _dio.get(ApiConstants.courseWin, queryParameters: params);
+      final res = await _dio.get(
+        ApiConstants.courseWin,
+        queryParameters: params,
+      );
       final error = _checkApiError(res.data);
       if (error != null) return ApiResult.failure(error);
       final items = _extractItems(res.data);
-      final result = items.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+      final result = items
+          .map((e) => Map<String, dynamic>.from(e as Map))
+          .toList();
       return ApiResult.success(result);
     } on DioException catch (e) {
       return ApiResult.failure(_dioErrorMsg(e));
@@ -510,7 +620,10 @@ class BoatRacingApiService {
   Future<ApiResult<String>> testConnection() async {
     try {
       final params = {..._baseParams(numOfRows: 1)};
-      final res = await _dio.get(ApiConstants.raceInfo, queryParameters: params);
+      final res = await _dio.get(
+        ApiConstants.raceInfo,
+        queryParameters: params,
+      );
       if (res.statusCode == 200) {
         final error = _checkApiError(res.data);
         if (error != null) return ApiResult.failure(error);
@@ -533,7 +646,10 @@ class BoatRacingApiService {
     return 0;
   }
 
-  List<Race> _buildRacesFromItems(List<Map<String, dynamic>> items, String dateYmd) {
+  List<Race> _buildRacesFromItems(
+    List<Map<String, dynamic>> items,
+    String dateYmd,
+  ) {
     final raceMap = <int, _RaceAggregate>{};
     final seenRacers = <String>{};
     for (final m in items) {
@@ -547,8 +663,11 @@ class BoatRacingApiService {
 
       raceMap.putIfAbsent(rn, () => _RaceAggregate());
       raceMap[rn]!.count++;
-      raceMap[rn]!.distance ??= int.tryParse(m['race_dist']?.toString() ?? m['race_len']?.toString() ?? '');
-      raceMap[rn]!.departureTime ??= m['dptre_tm']?.toString() ?? m['start_tm']?.toString();
+      raceMap[rn]!.distance ??= int.tryParse(
+        m['race_dist']?.toString() ?? m['race_len']?.toString() ?? '',
+      );
+      raceMap[rn]!.departureTime ??=
+          m['dptre_tm']?.toString() ?? m['start_tm']?.toString();
       raceMap[rn]!.status ??= m['organ_stat_cd']?.toString();
     }
 
@@ -574,9 +693,14 @@ class BoatRacingApiService {
     final seen = <String>{};
     final entries = <RaceEntry>[];
     for (final m in items) {
-      final courseNo = int.tryParse(
-        m['course_no']?.toString() ?? m['race_reg_no']?.toString() ?? m['back_no']?.toString() ?? '',
-      ) ?? (entries.length + 1);
+      final courseNo =
+          int.tryParse(
+            m['course_no']?.toString() ??
+                m['race_reg_no']?.toString() ??
+                m['back_no']?.toString() ??
+                '',
+          ) ??
+          (entries.length + 1);
 
       final name = m['racer_nm']?.toString().trim() ?? '';
       final key = '${courseNo}_$name';
@@ -584,23 +708,55 @@ class BoatRacingApiService {
       seen.add(key);
 
       String boatStr = m['boat_no']?.toString() ?? '';
-      if (boatStr.startsWith('B')) boatStr = boatStr.replaceFirst(RegExp(r'^B\d*0*'), '');
+      if (boatStr.startsWith('B')) {
+        boatStr = boatStr.replaceFirst(RegExp(r'^B\d*0*'), '');
+      }
       String motorStr = m['motor_no']?.toString() ?? '';
-      if (motorStr.startsWith('M')) motorStr = motorStr.replaceFirst(RegExp(r'^M\d*0*'), '');
+      if (motorStr.startsWith('M')) {
+        motorStr = motorStr.replaceFirst(RegExp(r'^M\d*0*'), '');
+      }
 
-      entries.add(RaceEntry(
-        courseNo: courseNo,
-        racerName: m['racer_nm']?.toString().trim() ?? '선수$courseNo',
-        racerId: m['racer_no']?.toString() ?? m['racer_nm']?.toString().trim() ?? 'R$courseNo',
-        grade: m['racer_grd']?.toString() ?? m['racer_grd_cd']?.toString() ?? '',
-        avgScore: double.tryParse(
-          m['avg_scr']?.toString() ?? m['tot_tms_avg_scr']?.toString() ?? m['tms_6_avg_scr']?.toString() ?? '',
-        ) ?? 0,
-        recent3Wins: int.tryParse(m['pre_win_cnt']?.toString() ?? m['win_ratio']?.toString() ?? '') ?? 0,
-        boatNo: int.tryParse(boatStr),
-        motorNo: int.tryParse(motorStr),
-        weight: double.tryParse(m['weight']?.toString() ?? m['racer_weight']?.toString() ?? m['wght']?.toString() ?? ''),
-      ));
+      entries.add(
+        RaceEntry(
+          courseNo: courseNo,
+          racerName: m['racer_nm']?.toString().trim() ?? '선수$courseNo',
+          racerId:
+              m['racer_no']?.toString() ??
+              m['racer_nm']?.toString().trim() ??
+              'R$courseNo',
+          grade:
+              m['racer_grd']?.toString() ?? m['racer_grd_cd']?.toString() ?? '',
+          avgScore:
+              double.tryParse(
+                m['avg_scr']?.toString() ??
+                    m['tot_tms_avg_scr']?.toString() ??
+                    m['tms_6_avg_scr']?.toString() ??
+                    '',
+              ) ??
+              0,
+          recentWinCount: int.tryParse(m['pre_win_cnt']?.toString() ?? '') ?? 0,
+          winRate: _doubleFrom(m, ['win_ratio']) ?? 0,
+          boatNo: int.tryParse(boatStr),
+          motorNo: int.tryParse(motorStr),
+          weight: double.tryParse(
+            m['weight']?.toString() ??
+                m['racer_weight']?.toString() ??
+                m['wght']?.toString() ??
+                '',
+          ),
+          avgStartTime: _doubleFrom(m, ['avg_strt_tm', 'avg_st']),
+          boatWinRate: _doubleFrom(m, [
+            'boat_win_ratio',
+            'boat_win_rate',
+            'boat_wrate',
+          ]),
+          motorWinRate: _doubleFrom(m, [
+            'motor_win_ratio',
+            'motor_win_rate',
+            'motor_wrate',
+          ]),
+        ),
+      );
     }
     entries.sort((a, b) => a.courseNo.compareTo(b.courseNo));
     return entries;
@@ -652,12 +808,18 @@ class BoatRacingApiService {
       secondNo: secondNo,
       third: third,
       thirdNo: thirdNo,
-      winOdds: _extractTrailingNum(m['pool1_val']?.toString()) ??
-          _doubleFrom(m, ['win_rt']) ?? 0,
-      placeOdds: _extractTrailingNum(m['pool2_val']?.toString()) ??
-          _doubleFrom(m, ['plc_rt']) ?? 0,
-      quinellaOdds: _extractTrailingNum(m['pool4_val']?.toString()) ??
-          _doubleFrom(m, ['qnl_rt', 'pool3_val']) ?? 0,
+      winOdds:
+          _extractTrailingNum(m['pool1_val']?.toString()) ??
+          _doubleFrom(m, ['win_rt']) ??
+          0,
+      placeOdds:
+          _extractTrailingNum(m['pool2_val']?.toString()) ??
+          _doubleFrom(m, ['plc_rt']) ??
+          0,
+      quinellaOdds:
+          _extractTrailingNum(m['pool4_val']?.toString()) ??
+          _doubleFrom(m, ['qnl_rt', 'pool3_val']) ??
+          0,
     );
   }
 
@@ -667,9 +829,6 @@ class BoatRacingApiService {
     final quinella = <String, double>{};
     final trio = <String, double>{};
     final trifecta = <String, double>{};
-
-    final p1 = _doubleFrom(m, ['pool1_val']);
-    if (p1 != null) win[0] = p1;
 
     final p21 = _doubleFrom(m, ['pool2_1_val']);
     final p22 = _doubleFrom(m, ['pool2_2_val']);
@@ -685,21 +844,33 @@ class BoatRacingApiService {
     final p6 = _doubleFrom(m, ['pool6_val']);
     if (p6 != null) trifecta['삼복승'] = p6;
 
-    return Odds(win: win, place: place, quinella: quinella, trio: trio, trifecta: trifecta);
+    return Odds(
+      win: win,
+      place: place,
+      quinella: quinella,
+      trio: trio,
+      trifecta: trifecta,
+    );
   }
 
   String? _checkApiError(dynamic data) {
     if (data is String) {
       if (data.contains('Unexpected errors')) return 'API 키가 유효하지 않거나 서비스 미신청';
-      if (data.contains('SERVICE_KEY_IS_NOT_REGISTERED')) return 'API 키가 등록되지 않음';
+      if (data.contains('SERVICE_KEY_IS_NOT_REGISTERED')) {
+        return 'API 키가 등록되지 않음';
+      }
       return 'API 응답 형식 오류';
     }
     if (data is! Map) return null;
     final map = data as Map<String, dynamic>;
-    final header = map['response']?['header'] ?? map['header'] ?? map['cmmMsgHeader'];
+    final header =
+        map['response']?['header'] ?? map['header'] ?? map['cmmMsgHeader'];
     if (header is Map) {
-      final code = header['resultCode']?.toString() ?? header['returnReasonCode']?.toString();
-      final msg = header['resultMsg'] ?? header['returnAuthMsg'] ?? header['errMsg'];
+      final code =
+          header['resultCode']?.toString() ??
+          header['returnReasonCode']?.toString();
+      final msg =
+          header['resultMsg'] ?? header['returnAuthMsg'] ?? header['errMsg'];
       if (code != null && code != '00' && code != '0') {
         return _mapErrorCode(code, msg?.toString() ?? '');
       }

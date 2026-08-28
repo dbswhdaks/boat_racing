@@ -6,6 +6,7 @@ import '../network/dio_client.dart';
 import '../../models/race.dart';
 import '../../models/race_entry.dart';
 import '../../models/race_result.dart';
+import '../../models/odds.dart';
 
 class KboatVideoInfo {
   final String dateYmd;
@@ -31,6 +32,8 @@ class KboatScraperService {
   static const _baseUrl = 'https://www.kboat.or.kr/broadcast/racevideo';
   static const _resultUrl = 'https://www.kboat.or.kr/main/race/result';
   static const _cardUrl = 'https://www.kboat.or.kr/race/card/decision';
+  static const _finalOddsUrl =
+      'https://www.kboat.or.kr/race/dividendrate/final';
   final Dio _dio = dioClient;
 
   final Map<String, List<KboatVideoInfo>> _cache = {};
@@ -39,6 +42,7 @@ class KboatScraperService {
   final Map<String, List<Race>> _cardRaceListCache = {};
   KboatRaceResultBundle? _resultCache;
   String? _resultCacheDate;
+  final Map<String, ({Odds odds, DateTime fetchedAt})> _oddsCache = {};
 
   String _monthKey(int year, int month) =>
       '$year${month.toString().padLeft(2, '0')}';
@@ -66,10 +70,12 @@ class KboatScraperService {
         final res = await _dio.post(
           _baseUrl,
           data: formData,
-          options: Options(headers: {
-            'X-Requested-With': 'XMLHttpRequest',
-            'Accept': 'text/html',
-          }),
+          options: Options(
+            headers: {
+              'X-Requested-With': 'XMLHttpRequest',
+              'Accept': 'text/html',
+            },
+          ),
         );
 
         final html = res.data?.toString() ?? '';
@@ -95,12 +101,14 @@ class KboatScraperService {
           if (seen.contains(key)) continue;
           seen.add(key);
 
-          results.add(KboatVideoInfo(
-            dateYmd: dateYmd,
-            raceNo: raceNo,
-            weekTcnt: weekTcnt,
-            dayTcnt: dayTcnt,
-          ));
+          results.add(
+            KboatVideoInfo(
+              dateYmd: dateYmd,
+              raceNo: raceNo,
+              weekTcnt: weekTcnt,
+              dayTcnt: dayTcnt,
+            ),
+          );
         }
       }
     } catch (e) {
@@ -138,10 +146,12 @@ class KboatScraperService {
         final res = await _dio.post(
           _baseUrl,
           data: formData,
-          options: Options(headers: {
-            'X-Requested-With': 'XMLHttpRequest',
-            'Accept': 'text/html',
-          }),
+          options: Options(
+            headers: {
+              'X-Requested-With': 'XMLHttpRequest',
+              'Accept': 'text/html',
+            },
+          ),
         );
 
         final html = res.data?.toString() ?? '';
@@ -173,8 +183,9 @@ class KboatScraperService {
   /// 1. 확정출주표 페이지(`/race/card/decision`) — 오늘/미래 경주 포함, 출발시간·거리 포함
   /// 2. 경주영상 페이지(`/broadcast/racevideo`) — 과거 경주(영상 존재) 한정
   Future<List<Race>> fetchRaceList({required String date}) async {
-    final cardRaces = await fetchRaceListFromCard(date: date)
-        .catchError((_) => <Race>[]);
+    final cardRaces = await fetchRaceListFromCard(
+      date: date,
+    ).catchError((_) => <Race>[]);
     if (cardRaces.isNotEmpty) return cardRaces;
 
     final year = date.substring(0, 4);
@@ -186,7 +197,8 @@ class KboatScraperService {
     if (filtered.isEmpty) {
       final all = await fetchVideos(
         startDate: '$year${mm}01',
-        endDate: '$year$mm${DateTime(int.parse(year), int.parse(mm) + 1, 0).day}',
+        endDate:
+            '$year$mm${DateTime(int.parse(year), int.parse(mm) + 1, 0).day}',
       );
       filtered.addAll(all.where((v) => v.dateYmd == date));
     }
@@ -220,19 +232,19 @@ class KboatScraperService {
       final res = await _dio.post(
         _cardUrl,
         data: FormData.fromMap({'stndYear': y.toString()}),
-        options: Options(headers: {
-          'X-Requested-With': 'XMLHttpRequest',
-          'Accept': 'text/html',
-        }),
+        options: Options(
+          headers: {
+            'X-Requested-With': 'XMLHttpRequest',
+            'Accept': 'text/html',
+          },
+        ),
       );
 
       final html = res.data?.toString() ?? '';
       if (html.isEmpty) return {};
 
       // (NN회 N일) MM월 DD일 패턴
-      final pattern = RegExp(
-        r'\((\d+)회\s*(\d+)일\)\s*(\d{1,2})월\s*(\d{1,2})일',
-      );
+      final pattern = RegExp(r'\((\d+)회\s*(\d+)일\)\s*(\d{1,2})월\s*(\d{1,2})일');
 
       final mappings = <String, (int, int)>{};
       for (final m in pattern.allMatches(html)) {
@@ -259,6 +271,205 @@ class KboatScraperService {
     return mappings[date];
   }
 
+  Future<Odds> fetchFinalOdds({
+    required String date,
+    required int raceNo,
+  }) async {
+    final cacheKey = '${date}_$raceNo';
+    final cached = _oddsCache[cacheKey];
+    if (cached != null &&
+        DateTime.now().difference(cached.fetchedAt) <
+            const Duration(seconds: 15)) {
+      return cached.odds;
+    }
+
+    final weekDay = await getWeekDayForDate(date);
+    if (weekDay == null || date.length < 4) return const Odds();
+
+    try {
+      final year = date.substring(0, 4);
+      final response = await _dio.get(
+        finalOddsRequestUrl(
+          year: year,
+          weekTcnt: weekDay.$1,
+          dayTcnt: weekDay.$2,
+          raceNo: raceNo,
+        ),
+        options: Options(
+          headers: {
+            'X-Requested-With': 'XMLHttpRequest',
+            'Accept': 'text/html',
+          },
+        ),
+      );
+      final html = response.data?.toString() ?? '';
+      final odds = parseFinalOddsHtml(html);
+      if (!odds.isEmpty) {
+        _oddsCache[cacheKey] = (odds: odds, fetchedAt: DateTime.now());
+      }
+      return odds;
+    } catch (e) {
+      if (kDebugMode) debugPrint('[KBOAT] 최종배당 조회 실패: $e');
+      return const Odds();
+    }
+  }
+
+  @visibleForTesting
+  String finalOddsRequestUrl({
+    required String year,
+    required int weekTcnt,
+    required int dayTcnt,
+    required int raceNo,
+  }) {
+    final raceNoPath = raceNo.toString().padLeft(2, '0');
+    return '$_finalOddsUrl/$year/$weekTcnt/$dayTcnt/$raceNoPath';
+  }
+
+  @visibleForTesting
+  Odds parseFinalOddsHtml(String html) {
+    if (html.isEmpty) return const Odds();
+
+    final sections = <String, String>{};
+    final headings = RegExp(
+      r'<div\s+class="comTitH3">\s*<h3>(.*?)</h3>\s*</div>',
+      dotAll: true,
+    ).allMatches(html).toList();
+    for (var index = 0; index < headings.length; index++) {
+      final title = _plainText(headings[index].group(1) ?? '');
+      final end = index + 1 < headings.length
+          ? headings[index + 1].start
+          : html.length;
+      sections[title] = html.substring(headings[index].end, end);
+    }
+
+    return Odds(
+      win: _parseCourseTable(sections['단승식']),
+      show: _parseCourseTable(sections['연승식']),
+      exacta: _parseMatrixTable(sections['쌍승식'], ordered: true),
+      place: _parseMatrixTable(sections['복승식'], ordered: false),
+      trio: _parseCombinationTables(sections['삼복승식'], size: 3),
+      xla: _parseCombinationTables(sections['쌍복승식'], size: 3),
+      trifecta: _parseTrifectaTables(sections['삼쌍승식']),
+    );
+  }
+
+  Map<int, double> _parseCourseTable(String? section) {
+    if (section == null) return const {};
+    for (final row in _tableRows(section)) {
+      final values = _dataCells(
+        row,
+      ).map((cell) => double.tryParse(_plainText(cell))).toList();
+      if (values.length < 6 || values.take(6).any((value) => value == null)) {
+        continue;
+      }
+      return {
+        for (var index = 0; index < 6; index++) index + 1: values[index]!,
+      };
+    }
+    return const {};
+  }
+
+  Map<String, double> _parseMatrixTable(
+    String? section, {
+    required bool ordered,
+  }) {
+    if (section == null) return const {};
+    final result = <String, double>{};
+    for (final row in _tableRows(section)) {
+      final cells = _allCells(row).map(_plainText).toList();
+      if (cells.length < 7) continue;
+      final first = int.tryParse(cells.first);
+      if (first == null || first < 1 || first > 6) continue;
+      for (var column = 1; column <= 6; column++) {
+        final value = double.tryParse(cells[column]);
+        if (value == null || first == column) continue;
+        if (!ordered && first > column) continue;
+        result['$first-$column'] = value;
+      }
+    }
+    return result;
+  }
+
+  Map<String, double> _parseCombinationTables(
+    String? section, {
+    required int size,
+  }) {
+    if (section == null) return const {};
+    final result = <String, double>{};
+    final combinationPattern = RegExp(
+      size == 3 ? r'^[1-6]-[1-6]-[1-6]$' : r'^[1-6]-[1-6]$',
+    );
+    for (final row in _tableRows(section)) {
+      final cells = _allCells(row).map(_plainText).toList();
+      for (var index = 0; index + 1 < cells.length; index += 2) {
+        final combination = cells[index];
+        final value = double.tryParse(cells[index + 1]);
+        if (combinationPattern.hasMatch(combination) && value != null) {
+          result[combination] = value;
+        }
+      }
+    }
+    return result;
+  }
+
+  Map<String, double> _parseTrifectaTables(String? section) {
+    if (section == null) return const {};
+    final result = <String, double>{};
+    final tables = RegExp(
+      r'<table\b[^>]*>(.*?)</table>',
+      dotAll: true,
+    ).allMatches(section);
+    for (final tableMatch in tables) {
+      final table = tableMatch.group(1) ?? '';
+      final firstTwo = RegExp(
+        r'>\s*([1-6]-[1-6])\s*<',
+      ).allMatches(table).map((match) => match.group(1)!).toList();
+      if (firstTwo.isEmpty) continue;
+
+      for (final row in _tableRows(table)) {
+        final cells = _dataCells(row).map(_plainText).toList();
+        if (cells.length < firstTwo.length * 2) continue;
+        for (var index = 0; index < firstTwo.length; index++) {
+          final third = int.tryParse(cells[index * 2]);
+          final value = double.tryParse(cells[index * 2 + 1]);
+          if (third != null && value != null) {
+            result['${firstTwo[index]}-$third'] = value;
+          }
+        }
+      }
+    }
+    return result;
+  }
+
+  Iterable<String> _tableRows(String html) {
+    return RegExp(
+      r'<tr\b[^>]*>(.*?)</tr>',
+      dotAll: true,
+    ).allMatches(html).map((match) => match.group(1) ?? '');
+  }
+
+  List<String> _allCells(String row) {
+    return RegExp(
+      r'<t[hd]\b[^>]*>(.*?)</t[hd]>',
+      dotAll: true,
+    ).allMatches(row).map((match) => match.group(1) ?? '').toList();
+  }
+
+  List<String> _dataCells(String row) {
+    return RegExp(
+      r'<td\b[^>]*>(.*?)</td>',
+      dotAll: true,
+    ).allMatches(row).map((match) => match.group(1) ?? '').toList();
+  }
+
+  String _plainText(String html) {
+    return html
+        .replaceAll(RegExp(r'<[^>]+>'), '')
+        .replaceAll('&nbsp;', '')
+        .replaceAll('&#45;', '-')
+        .trim();
+  }
+
   /// 확정출주표 페이지에서 경주 목록 추출 (오늘/미래 경주 표시용)
   Future<List<Race>> fetchRaceListFromCard({required String date}) async {
     if (_cardRaceListCache.containsKey(date)) {
@@ -277,10 +488,12 @@ class KboatScraperService {
           'tms': wd.$1.toString(),
           'dayOrd': wd.$2.toString(),
         }),
-        options: Options(headers: {
-          'X-Requested-With': 'XMLHttpRequest',
-          'Accept': 'text/html',
-        }),
+        options: Options(
+          headers: {
+            'X-Requested-With': 'XMLHttpRequest',
+            'Accept': 'text/html',
+          },
+        ),
       );
 
       final html = res.data?.toString() ?? '';
@@ -314,7 +527,9 @@ class KboatScraperService {
       if (byRaceNo.containsKey(raceNo)) continue;
 
       final time = m.group(2)!;
-      final segEnd = i + 1 < matches.length ? matches[i + 1].start : html.length;
+      final segEnd = i + 1 < matches.length
+          ? matches[i + 1].start
+          : html.length;
       final segment = html.substring(m.start, segEnd);
       final distMatch = distPattern.firstMatch(segment);
       final distance = distMatch != null
@@ -357,10 +572,12 @@ class KboatScraperService {
     try {
       final res = await _dio.get(
         _resultUrl,
-        options: Options(headers: {
-          'X-Requested-With': 'XMLHttpRequest',
-          'Accept': 'application/json',
-        }),
+        options: Options(
+          headers: {
+            'X-Requested-With': 'XMLHttpRequest',
+            'Accept': 'application/json',
+          },
+        ),
       );
 
       final body = res.data;
@@ -393,7 +610,7 @@ class KboatScraperService {
 
         if (firstName.isEmpty) continue;
 
-        double _odds(String key) =>
+        double parseOdds(String key) =>
             double.tryParse(rs[key]?.toString() ?? '') ?? 0;
 
         final placeStr = rs['place']?.toString() ?? '0';
@@ -412,13 +629,13 @@ class KboatScraperService {
           secondNo: secondNo,
           third: thirdName,
           thirdNo: thirdNo,
-          winOdds: _odds('win'),
+          winOdds: parseOdds('win'),
           placeOdds: placeOdds,
-          quinellaOdds: _odds('quinella'),
-          exactaOdds: _odds('exacta'),
-          triellaOdds: _odds('triella'),
-          xlaOdds: _odds('xla'),
-          trxOdds: _odds('trx'),
+          quinellaOdds: parseOdds('quinella'),
+          exactaOdds: parseOdds('exacta'),
+          triellaOdds: parseOdds('triella'),
+          xlaOdds: parseOdds('xla'),
+          trxOdds: parseOdds('trx'),
         );
 
         final rankRacer = rs['rankRacer']?.toString() ?? '';
@@ -506,10 +723,12 @@ class KboatScraperService {
           'tms': weekTcnt.toString(),
           'dayOrd': dayTcnt.toString(),
         }),
-        options: Options(headers: {
-          'X-Requested-With': 'XMLHttpRequest',
-          'Accept': 'text/html',
-        }),
+        options: Options(
+          headers: {
+            'X-Requested-With': 'XMLHttpRequest',
+            'Accept': 'text/html',
+          },
+        ),
       );
 
       final html = res.data?.toString() ?? '';
@@ -530,9 +749,7 @@ class KboatScraperService {
   Map<int, List<RaceEntry>> _parseRaceCardHtml(String html) {
     final result = <int, List<RaceEntry>>{};
 
-    final racePattern = RegExp(
-      r'제\s*(\d+)경주\s*\(출발시간\s*[\d:]+\)',
-    );
+    final racePattern = RegExp(r'제\s*(\d+)경주\s*\(출발시간\s*[\d:]+\)');
     final raceMatches = racePattern.allMatches(html).toList();
 
     for (int i = 0; i < raceMatches.length; i++) {
@@ -564,10 +781,7 @@ class KboatScraperService {
     r'<div\s+class="other">\s*(\d+)기/([\w\d]+)/(\d+)세',
   );
 
-  static final _tdCellPattern = RegExp(
-    r'<td[^>]*>(.*?)</td>',
-    dotAll: true,
-  );
+  static final _tdCellPattern = RegExp(r'<td[^>]*>(.*?)</td>', dotAll: true);
 
   static final _tagStripPattern = RegExp(r'<[^>]+>');
 
@@ -609,27 +823,31 @@ class KboatScraperService {
         return inner.replaceAll(_tagStripPattern, '').trim();
       }).toList();
 
-      final weight = cells.isNotEmpty
-          ? double.tryParse(cells[0])
-          : null;
+      final weight = cells.isNotEmpty ? double.tryParse(cells[0]) : null;
       final avgScore = cells.length > 2
           ? (double.tryParse(cells[2]) ?? 0.0)
           : 0.0;
-      int winRate = 0;
+      double winRate = 0;
       if (cells.length > 3) {
         final wr = cells[3].replaceAll('%', '').trim();
-        winRate = (double.tryParse(wr) ?? 0).round();
+        winRate = double.tryParse(wr) ?? 0;
       }
+      final avgStartTime = cells.length > 6
+          ? double.tryParse(cells[6].replaceAll(RegExp(r'[^0-9.]'), ''))
+          : null;
 
-      entries.add(RaceEntry(
-        courseNo: courseNo,
-        racerName: name,
-        racerId: racerId,
-        grade: grade,
-        avgScore: avgScore,
-        recent3Wins: winRate,
-        weight: weight,
-      ));
+      entries.add(
+        RaceEntry(
+          courseNo: courseNo,
+          racerName: name,
+          racerId: racerId,
+          grade: grade,
+          avgScore: avgScore,
+          winRate: winRate,
+          weight: weight,
+          avgStartTime: avgStartTime,
+        ),
+      );
     }
 
     entries.sort((a, b) => a.courseNo.compareTo(b.courseNo));

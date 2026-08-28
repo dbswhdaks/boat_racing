@@ -5,7 +5,7 @@ import '../../../models/odds.dart';
 
 const Color _kPrimary = Color(0xFF1565C0);
 
-/// 배당률 패널 (단승·복승·쌍승·삼복승·삼쌍승)
+/// KBOAT 최종 배당률 7개 승식 패널.
 class OddsPanel extends StatelessWidget {
   final Odds odds;
 
@@ -16,30 +16,24 @@ class OddsPanel extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        _OddsSection(
-          title: '단승',
-          child: _WinGrid(odds.win),
-        ),
+        _OddsSection(title: '단승', child: _WinGrid(odds.win)),
         const SizedBox(height: 16),
-        _OddsSection(
-          title: '복승',
-          child: _ComboMap(odds.place),
-        ),
+        _OddsSection(title: '연승', child: _WinGrid(odds.show)),
+        const SizedBox(height: 16),
+        _OddsSection(title: '복승', child: _ComboMap(odds.place)),
         const SizedBox(height: 16),
         _OddsSection(
           title: '쌍승',
-          child: _ComboMap(odds.quinella),
+          child: _ComboMap(
+            odds.exacta.isNotEmpty ? odds.exacta : odds.quinella,
+          ),
         ),
         const SizedBox(height: 16),
-        _OddsSection(
-          title: '삼복승',
-          child: _ComboMap(odds.trio),
-        ),
+        _OddsSection(title: '삼복승', child: _ComboMap(odds.trio)),
         const SizedBox(height: 16),
-        _OddsSection(
-          title: '삼쌍승',
-          child: _ComboMap(odds.trifecta),
-        ),
+        _OddsSection(title: '쌍복승', child: _ComboMap(odds.xla)),
+        const SizedBox(height: 16),
+        _OddsSection(title: '삼쌍승', child: _ComboMap(odds.trifecta)),
       ],
     );
   }
@@ -128,7 +122,9 @@ class _EmptyOdds extends StatelessWidget {
       child: Text(
         '배당 정보 없음',
         style: GoogleFonts.notoSansKr(
-          color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.55),
+          color: Theme.of(
+            context,
+          ).colorScheme.onSurface.withValues(alpha: 0.55),
         ),
       ),
     );
@@ -140,11 +136,7 @@ class OddsChip extends StatelessWidget {
   final String label;
   final double value;
 
-  const OddsChip({
-    super.key,
-    required this.label,
-    required this.value,
-  });
+  const OddsChip({super.key, required this.label, required this.value});
 
   @override
   Widget build(BuildContext context) {
