@@ -53,3 +53,6 @@ android/key.properties
 # Deploy secrets (Firebase App Distribution, Play supply 등)
 .deploy.env
 release_notes.txt
+
+# 모델 학습 캐시 (공공데이터포털 원본 응답)
+tool/model/cache/

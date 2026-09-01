@@ -276,13 +276,16 @@ class BoatRacingApiService {
 
   // ─── 경주결과 (연간 전체 → week_tcnt/day_tcnt 필터) ───
 
+  /// [weekDay] 를 넘기면 RACE_DOC 기반 날짜 변환을 건너뛴다. RACE_DOC 은 경주 당일
+  /// 이후에 갱신되므로 당일 경주는 호출자가 KBOAT 매핑을 넘겨줘야 조회할 수 있다.
   Future<ApiResult<List<RaceResult>>> fetchRaceResult({
     required String date,
     int? rcNo,
+    (int, int)? weekDay,
   }) async {
     try {
       final year = int.parse(date.substring(0, 4));
-      final wd = await getWeekDayForDate(date);
+      final wd = weekDay ?? await getWeekDayForDate(date);
       if (wd == null) return const ApiResult.success([]);
 
       final allItems = await _fetchAllRaceResult(year: year);
@@ -744,17 +747,24 @@ class BoatRacingApiService {
                 m['wght']?.toString() ??
                 '',
           ),
-          avgStartTime: _doubleFrom(m, ['avg_strt_tm', 'avg_st']),
+          avgStartTime: _avgStartTimeFrom(m),
+          avgRankPoint: _doubleFrom(m, ['avg_rank']),
+          top2Rate: _doubleFrom(m, ['high_rate']),
           boatWinRate: _doubleFrom(m, [
+            'boat_high_rank_ratio',
             'boat_win_ratio',
             'boat_win_rate',
             'boat_wrate',
           ]),
+          boatRankPoint: _doubleFrom(m, ['boat_avg_rank_scr']),
           motorWinRate: _doubleFrom(m, [
+            'mot_high_rank_ratio',
             'motor_win_ratio',
             'motor_win_rate',
             'motor_wrate',
           ]),
+          motorTop3Rate: _doubleFrom(m, ['mot_high_3_rank_ratio']),
+          motorRankPoint: _doubleFrom(m, ['mot_avg_rank_scr']),
         ),
       );
     }
@@ -943,6 +953,14 @@ class BoatRacingApiService {
       if (v is String) return double.tryParse(v);
     }
     return null;
+  }
+
+  /// 출주표의 평균 ST. RACE_DOC 은 1/100초 정수(17 == 0.17초)로 주고 0 은 결측이다.
+  /// 다른 엔드포인트는 이미 초 단위(0.17)로 주므로 크기로 구분한다.
+  double? _avgStartTimeFrom(Map<String, dynamic> m) {
+    final raw = _doubleFrom(m, ['avg_strt_tm', 'avg_st']);
+    if (raw == null || raw <= 0) return null;
+    return raw >= 1 ? raw / 100 : raw;
   }
 
   String? _strFrom(Map<String, dynamic> m, List<String> keys) {

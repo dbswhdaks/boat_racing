@@ -216,8 +216,7 @@ final raceEntriesProvider =
 
       if (apiEntries.length < 6) {
         try {
-          var wd = await api.getWeekDayForDate(params.date);
-          wd ??= await kboat.getWeekDayForDate(params.date);
+          final wd = await _resolveWeekDay(api, kboat, params.date);
           if (wd != null) {
             final kboatEntries = await kboat.fetchRaceEntries(
               weekTcnt: wd.$1,
@@ -298,6 +297,28 @@ final oddsProvider = FutureProvider.family<Odds, ({String date, int raceNo})>((
   return const Odds();
 });
 
+/// 날짜 → (회차, 일차) 변환. 공공 API 의 RACE_DOC 은 경주 당일 이후에 갱신되므로,
+/// 매핑이 아직 없으면 KBOAT 확정출주표 페이지의 연간 매핑으로 보완한다.
+Future<(int, int)?> _resolveWeekDay(
+  BoatRacingApiService api,
+  KboatScraperService kboat,
+  String date,
+) async {
+  try {
+    final fromApi = await api.getWeekDayForDate(date);
+    if (fromApi != null) return fromApi;
+  } catch (e) {
+    if (kDebugMode) debugPrint('[Provider] 공공 API 회차 매핑 실패: $e');
+  }
+
+  try {
+    return await kboat.getWeekDayForDate(date);
+  } catch (e) {
+    if (kDebugMode) debugPrint('[Provider] KBOAT 회차 매핑 실패: $e');
+    return null;
+  }
+}
+
 /// 경주 결과
 final raceResultProvider =
     FutureProvider.family<RaceResult, ({String date, int raceNo})>((
@@ -326,6 +347,7 @@ final raceResultProvider =
       final result = await api.fetchRaceResult(
         date: params.date,
         rcNo: params.raceNo,
+        weekDay: await _resolveWeekDay(api, kboat, params.date),
       );
       if (result.isSuccess && result.data != null && result.data!.isNotEmpty) {
         return result.data!.first;
@@ -445,19 +467,15 @@ final predictionProvider =
             raceNo: params.raceNo,
           )).future,
         ),
-        ref.watch(
-          oddsProvider((date: params.date, raceNo: params.raceNo)).future,
-        ),
         api.fetchBoatWinRates(year: predictionYear),
         api.fetchMotorWinRates(year: predictionYear),
         backup.loadRaceConditions(date: params.date, raceNo: params.raceNo),
       ]);
 
       final entriesResult = results[0] as DataWithSource<List<RaceEntry>>;
-      final odds = results[1] as Odds;
-      final boatWinRates = results[2] as Map<int, double>;
-      final motorWinRates = results[3] as Map<int, double>;
-      final conditions = results[4] as RaceConditions?;
+      final boatWinRates = results[1] as Map<int, double>;
+      final motorWinRates = results[2] as Map<int, double>;
+      final conditions = results[3] as RaceConditions?;
       final enrichedEntries = await _enrichPredictionEntries(
         api,
         entriesResult.data,
@@ -472,7 +490,6 @@ final predictionProvider =
       );
       final prediction = PredictionEngine.predict(
         enrichedEntries,
-        odds: odds,
         conditions: conditions,
       );
       await backup.savePrediction(
@@ -493,11 +510,14 @@ Future<List<RaceEntry>> _enrichPredictionEntries(
   final year = date.length >= 4 ? int.tryParse(date.substring(0, 4)) : null;
   return Future.wait(
     entries.map((entry) async {
+      // 출주표에서 이미 읽은 장비 성적이 있으면 그대로 두고, 없을 때만 연간 집계로 채운다.
       final equippedEntry = entry.copyWith(
-        boatWinRate: entry.boatNo == null ? null : boatWinRates[entry.boatNo],
-        motorWinRate: entry.motorNo == null
-            ? null
-            : motorWinRates[entry.motorNo],
+        boatWinRate:
+            entry.boatWinRate ??
+            (entry.boatNo == null ? null : boatWinRates[entry.boatNo]),
+        motorWinRate:
+            entry.motorWinRate ??
+            (entry.motorNo == null ? null : motorWinRates[entry.motorNo]),
       );
       try {
         final result = await api.fetchRacerInfo(
@@ -509,12 +529,19 @@ Future<List<RaceEntry>> _enrichPredictionEntries(
           result.data!,
           entry: equippedEntry,
         );
+        // 선수정보 API 는 출주표(정수로 잘려 나옴)보다 정밀한 연간 지표를 준다.
         return equippedEntry.copyWith(
           avgScore: detail.avgScore > 0 ? detail.avgScore : null,
           winRate: (detail.winRatio ?? detail.winRate) > 0
               ? detail.winRatio ?? detail.winRate
               : null,
           avgStartTime: detail.avgStartTime,
+          avgRankPoint: (detail.yearAvgRank ?? 0) > 0
+              ? detail.yearAvgRank
+              : null,
+          top2Rate: (detail.consecutiveWinRate ?? 0) > 0
+              ? detail.consecutiveWinRate
+              : null,
         );
       } catch (_) {
         return equippedEntry;

@@ -126,8 +126,13 @@ class SupabaseBackupService {
               'motor_no': e.motorNo,
               'weight': e.weight,
               'avg_start_time': e.avgStartTime,
+              'avg_rank_point': e.avgRankPoint,
+              'top2_rate': e.top2Rate,
               'boat_win_rate': e.boatWinRate,
+              'boat_rank_point': e.boatRankPoint,
               'motor_win_rate': e.motorWinRate,
+              'motor_top3_rate': e.motorTop3Rate,
+              'motor_rank_point': e.motorRankPoint,
             },
           )
           .toList();
@@ -168,8 +173,13 @@ class SupabaseBackupService {
           motorNo: row['motor_no'] as int?,
           weight: (row['weight'] as num?)?.toDouble(),
           avgStartTime: (row['avg_start_time'] as num?)?.toDouble(),
+          avgRankPoint: (row['avg_rank_point'] as num?)?.toDouble(),
+          top2Rate: (row['top2_rate'] as num?)?.toDouble(),
           boatWinRate: (row['boat_win_rate'] as num?)?.toDouble(),
+          boatRankPoint: (row['boat_rank_point'] as num?)?.toDouble(),
           motorWinRate: (row['motor_win_rate'] as num?)?.toDouble(),
+          motorTop3Rate: (row['motor_top3_rate'] as num?)?.toDouble(),
+          motorRankPoint: (row['motor_rank_point'] as num?)?.toDouble(),
         );
       }).toList();
     } catch (e) {

@@ -734,7 +734,7 @@ class KboatScraperService {
       final html = res.data?.toString() ?? '';
       if (html.isEmpty) return [];
 
-      final allEntries = _parseRaceCardHtml(html);
+      final allEntries = parseRaceCardHtml(html);
       for (final entry in allEntries.entries) {
         _entryCache['$weekTcnt-$dayTcnt-${entry.key}'] = entry.value;
       }
@@ -746,26 +746,27 @@ class KboatScraperService {
     }
   }
 
-  Map<int, List<RaceEntry>> _parseRaceCardHtml(String html) {
-    final result = <int, List<RaceEntry>>{};
-
+  @visibleForTesting
+  Map<int, List<RaceEntry>> parseRaceCardHtml(String html) {
     final racePattern = RegExp(r'제\s*(\d+)경주\s*\(출발시간\s*[\d:]+\)');
-    final raceMatches = racePattern.allMatches(html).toList();
 
-    for (int i = 0; i < raceMatches.length; i++) {
-      final raceNo = int.parse(raceMatches[i].group(1)!);
-      final start = raceMatches[i].start;
-      final end = i + 1 < raceMatches.length
-          ? raceMatches[i + 1].start
-          : html.length;
-      final section = html.substring(start, end);
-
-      final entries = _parseRacerRows(section);
-      if (entries.isNotEmpty) {
-        result[raceNo] = entries;
-      }
+    // 같은 문구가 제목과 표 caption 에 중복으로 나오므로 경주별 첫 위치만 남긴다.
+    final starts = <int, int>{};
+    for (final match in racePattern.allMatches(html)) {
+      starts.putIfAbsent(int.parse(match.group(1)!), () => match.start);
     }
 
+    final raceNos = starts.keys.toList()
+      ..sort((a, b) => starts[a]!.compareTo(starts[b]!));
+
+    final result = <int, List<RaceEntry>>{};
+    for (var i = 0; i < raceNos.length; i++) {
+      final end = i + 1 < raceNos.length
+          ? starts[raceNos[i + 1]]!
+          : html.length;
+      final entries = _parseRacerRows(html.substring(starts[raceNos[i]]!, end));
+      if (entries.isNotEmpty) result[raceNos[i]] = entries;
+    }
     return result;
   }
 
@@ -785,17 +786,23 @@ class KboatScraperService {
 
   static final _tagStripPattern = RegExp(r'<[^>]+>');
 
+  static final _tbodyPattern = RegExp(
+    r'<tbody[^>]*>(.*?)</tbody>',
+    dotAll: true,
+  );
+
+  /// 확정출주표의 경주 구획에는 표가 두 개 있다.
+  /// 첫 표는 선수 기록, 둘째 표는 모터·보트 기록이며 정번(코스)으로 이어 붙인다.
   List<RaceEntry> _parseRacerRows(String section) {
+    final bodies = _tbodyPattern.allMatches(section).toList();
+    if (bodies.isEmpty) return const [];
+
+    final equipment = bodies.length > 1
+        ? _parseEquipmentRows(bodies[1].group(1) ?? '')
+        : const <int, _Equipment>{};
+
     final entries = <RaceEntry>[];
-
-    final tbodyStart = section.indexOf('<tbody>');
-    final tbodyEnd = section.indexOf('</tbody>');
-    if (tbodyStart < 0 || tbodyEnd < 0) return entries;
-    final tbody = section.substring(tbodyStart, tbodyEnd);
-
-    final rows = tbody.split(RegExp(r'<tr\b'));
-
-    for (final row in rows) {
+    for (final row in (bodies.first.group(1) ?? '').split(RegExp(r'<tr\b'))) {
       if (row.trim().isEmpty) continue;
 
       final courseMatch = _coursePattern.firstMatch(row);
@@ -805,53 +812,80 @@ class KboatScraperService {
       final nameMatch = _namePattern.firstMatch(row);
       if (nameMatch == null) continue;
 
-      final racerId = nameMatch.group(1)!.trim();
-      final name = nameMatch.group(2)!.trim();
-
-      String grade = '';
-      final infoMatch = _infoPattern.firstMatch(row);
-      if (infoMatch != null) {
-        grade = infoMatch.group(2)!.trim();
-      }
-
-      // 선수정보(<th>) 이후의 <td> 셀들을 순서대로 추출.
-      // 컬럼 순서: [체중, 평균착순점, 평균득점, 승률, 연대율, 삼연대율, 평균ST, ...]
-      final thEnd = row.indexOf('</th>');
-      final afterTh = thEnd >= 0 ? row.substring(thEnd + 5) : row;
-      final cells = _tdCellPattern.allMatches(afterTh).map((m) {
-        final inner = m.group(1) ?? '';
-        return inner.replaceAll(_tagStripPattern, '').trim();
-      }).toList();
-
-      final weight = cells.isNotEmpty ? double.tryParse(cells[0]) : null;
-      final avgScore = cells.length > 2
-          ? (double.tryParse(cells[2]) ?? 0.0)
-          : 0.0;
-      double winRate = 0;
-      if (cells.length > 3) {
-        final wr = cells[3].replaceAll('%', '').trim();
-        winRate = double.tryParse(wr) ?? 0;
-      }
-      final avgStartTime = cells.length > 6
-          ? double.tryParse(cells[6].replaceAll(RegExp(r'[^0-9.]'), ''))
-          : null;
+      // 선수정보(<th>) 이후의 <td> 셀 순서:
+      // [0]체중 [1~6]최근 6회차(평균착순점·평균득점·승률·연대율·삼연대율·평균ST)
+      // [7]최근 8경주 착순 [8]연간 평균착순점 [9]연간 연대율 [10]F/L [11]평균사고점
+      final cells = _dataCellsAfterHeader(row);
+      final gear = equipment[courseNo];
 
       entries.add(
         RaceEntry(
           courseNo: courseNo,
-          racerName: name,
-          racerId: racerId,
-          grade: grade,
-          avgScore: avgScore,
-          winRate: winRate,
-          weight: weight,
-          avgStartTime: avgStartTime,
+          racerName: nameMatch.group(2)!.trim(),
+          racerId: nameMatch.group(1)!.trim(),
+          grade: _infoPattern.firstMatch(row)?.group(2)?.trim() ?? '',
+          avgScore: _cellNumber(cells, 2) ?? 0,
+          winRate: _cellNumber(cells, 3) ?? 0,
+          weight: _cellNumber(cells, 0),
+          avgStartTime: _cellNumber(cells, 6),
+          // 예측 모델은 최근 6회차가 아니라 연간 누적 지표를 쓴다.
+          avgRankPoint: _cellNumber(cells, 8),
+          top2Rate: _cellNumber(cells, 9),
+          boatNo: gear?.boatNo,
+          boatWinRate: gear?.boatTop2Rate,
+          boatRankPoint: gear?.boatRankPoint,
+          motorNo: gear?.motorNo,
+          motorWinRate: gear?.motorTop2Rate,
+          motorTop3Rate: gear?.motorTop3Rate,
+          motorRankPoint: gear?.motorRankPoint,
         ),
       );
     }
 
     entries.sort((a, b) => a.courseNo.compareTo(b.courseNo));
     return entries;
+  }
+
+  /// 모터·보트 표의 <td> 셀 순서:
+  /// [0]출주횟수 [1~6]6개월 코스별 연대율
+  /// [7]모터번호 [8]모터 평균착순점 [9]모터 이연대율 [10]모터 삼연대율
+  /// [11~12]전 탑승 선수 [13]보트번호 [14]보트 평균착순점 [15]보트 연대율
+  Map<int, _Equipment> _parseEquipmentRows(String tbody) {
+    final result = <int, _Equipment>{};
+
+    for (final row in tbody.split(RegExp(r'<tr\b'))) {
+      final courseMatch = _coursePattern.firstMatch(row);
+      if (courseMatch == null) continue;
+
+      final cells = _dataCellsAfterHeader(row);
+      if (cells.length < 16) continue;
+
+      result[int.parse(courseMatch.group(1)!)] = _Equipment(
+        motorNo: int.tryParse(cells[7]),
+        motorRankPoint: _cellNumber(cells, 8),
+        motorTop2Rate: _cellNumber(cells, 9),
+        motorTop3Rate: _cellNumber(cells, 10),
+        boatNo: int.tryParse(cells[13]),
+        boatRankPoint: _cellNumber(cells, 14),
+        boatTop2Rate: _cellNumber(cells, 15),
+      );
+    }
+    return result;
+  }
+
+  List<String> _dataCellsAfterHeader(String row) {
+    final headerEnd = row.indexOf('</th>');
+    final body = headerEnd >= 0 ? row.substring(headerEnd + 5) : row;
+    return _tdCellPattern
+        .allMatches(body)
+        .map((m) => (m.group(1) ?? '').replaceAll(_tagStripPattern, '').trim())
+        .toList();
+  }
+
+  /// '22.2%', '4.3', '-' 처럼 섞여 오는 셀에서 숫자만 뽑는다.
+  static double? _cellNumber(List<String> cells, int index) {
+    if (index >= cells.length) return null;
+    return double.tryParse(cells[index].replaceAll(RegExp(r'[^0-9.]'), ''));
   }
 
   void invalidateResultCache() {
@@ -877,4 +911,25 @@ class KboatScraperService {
     _resultCacheDate = null;
     _entryCache.clear();
   }
+}
+
+/// 확정출주표 둘째 표에서 읽은 정번별 모터·보트 연간 성적.
+class _Equipment {
+  final int? motorNo;
+  final double? motorRankPoint;
+  final double? motorTop2Rate;
+  final double? motorTop3Rate;
+  final int? boatNo;
+  final double? boatRankPoint;
+  final double? boatTop2Rate;
+
+  const _Equipment({
+    required this.motorNo,
+    required this.motorRankPoint,
+    required this.motorTop2Rate,
+    required this.motorTop3Rate,
+    required this.boatNo,
+    required this.boatRankPoint,
+    required this.boatTop2Rate,
+  });
 }

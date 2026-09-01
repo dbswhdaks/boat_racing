@@ -140,8 +140,7 @@ class _RaceDetailScreenState extends ConsumerState<RaceDetailScreen>
       ..sort(
         (a, b) => PredictionEngine.comprehensiveScore(
           b,
-          entries,
-        ).compareTo(PredictionEngine.comprehensiveScore(a, entries)),
+        ).compareTo(PredictionEngine.comprehensiveScore(a)),
       );
     final compRankByCourse = _rankByCourse(compSorted, (e) => e.courseNo);
 
@@ -299,7 +298,7 @@ class _ComprehensiveTab extends StatelessWidget {
           ),
           const SizedBox(height: 4),
           Text(
-            '등급·득점·승률·ST·코스·장비를 반영한 점수 상위',
+            '코스·등급·평균착순점·연대율·모터·보트를 반영한 점수 상위',
             style: TextStyle(color: Colors.grey.shade500, fontSize: 12),
           ),
           const SizedBox(height: 12),
@@ -312,7 +311,7 @@ class _ComprehensiveTab extends StatelessWidget {
                 rank: rankLabels[i],
                 rankColor: rankColors[i],
                 entry: entry,
-                score: PredictionEngine.comprehensiveScore(entry, entries),
+                score: PredictionEngine.comprehensiveScore(entry),
               ),
             );
           }),

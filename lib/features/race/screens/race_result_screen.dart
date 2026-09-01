@@ -788,8 +788,7 @@ class _ComparisonSection extends ConsumerWidget {
       ..sort(
         (a, b) => PredictionEngine.comprehensiveScore(
           b,
-          entries,
-        ).compareTo(PredictionEngine.comprehensiveScore(a, entries)),
+        ).compareTo(PredictionEngine.comprehensiveScore(a)),
       );
     final compTop = compSorted.take(3).toList();
     final aiTop = prediction.rankings.take(3).toList();

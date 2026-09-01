@@ -1,5 +1,4 @@
 import 'package:boat_racing/core/services/prediction_engine.dart';
-import 'package:boat_racing/models/odds.dart';
 import 'package:boat_racing/models/prediction.dart';
 import 'package:boat_racing/models/race_entry.dart';
 import 'package:boat_racing/models/race_result.dart';
@@ -8,94 +7,102 @@ import 'package:flutter_test/flutter_test.dart';
 RaceEntry _entry(
   int course, {
   String grade = 'B1',
-  double score = 5,
-  double winRate = 10,
-  int recentWins = 0,
-  double? startTime,
-  double? boatWinRate,
+  double? avgRankPoint,
+  double? top2Rate,
+  double? motorRankPoint,
   double? motorWinRate,
+  double? motorTop3Rate,
+  double? boatRankPoint,
+  double? boatWinRate,
 }) {
   return RaceEntry(
     courseNo: course,
     racerName: '선수$course',
     racerId: 'R$course',
     grade: grade,
-    avgScore: score,
-    recentWinCount: recentWins,
-    winRate: winRate,
-    avgStartTime: startTime,
-    boatWinRate: boatWinRate,
+    avgRankPoint: avgRankPoint,
+    top2Rate: top2Rate,
+    motorRankPoint: motorRankPoint,
     motorWinRate: motorWinRate,
+    motorTop3Rate: motorTop3Rate,
+    boatRankPoint: boatRankPoint,
+    boatWinRate: boatWinRate,
   );
 }
 
+List<int> _order(RacePrediction prediction) =>
+    prediction.rankings.map((racer) => racer.courseNo).toList();
+
 void main() {
   group('PredictionEngine', () {
-    test('승률과 최근 우승 수를 서로 다른 피처로 계산한다', () {
-      final entries = [
-        _entry(1, winRate: 30, recentWins: 0),
-        _entry(2, winRate: 0, recentWins: 3),
-      ];
-
-      final prediction = PredictionEngine.predict(entries);
-
-      expect(prediction.rankings.first.factors, contains('승률'));
-      expect(
-        prediction.rankings.firstWhere((racer) => racer.courseNo == 2).factors,
-        contains('최근 우승'),
+    test('조건이 같으면 안쪽 코스를 높게 평가한다', () {
+      final prediction = PredictionEngine.predict(
+        List.generate(6, (index) => _entry(index + 1)),
       );
+
+      expect(_order(prediction), [1, 2, 3, 4, 5, 6]);
     });
 
-    test('선수, ST, 장비 성적이 좋은 선수를 높게 평가한다', () {
+    test('예상 승률의 합은 100%다', () {
+      final prediction = PredictionEngine.predict(
+        List.generate(6, (index) => _entry(index + 1, grade: 'A2')),
+      );
+
+      final total = prediction.rankings.fold<double>(
+        0,
+        (sum, racer) => sum + racer.winProb,
+      );
+      expect(total, closeTo(100, 0.001));
+    });
+
+    test('바깥 코스라도 기록과 장비가 압도적이면 1순위가 된다', () {
       final entries = List.generate(6, (index) => _entry(index + 1));
-      entries[3] = _entry(
-        4,
+      entries[5] = _entry(
+        6,
         grade: 'A1',
-        score: 9,
-        winRate: 35,
-        recentWins: 3,
-        startTime: 0.12,
-        boatWinRate: 30,
-        motorWinRate: 35,
+        avgRankPoint: 8.5,
+        top2Rate: 70,
+        motorRankPoint: 7.5,
+        motorWinRate: 55,
+        motorTop3Rate: 72,
+        boatRankPoint: 7,
+        boatWinRate: 52,
       );
 
-      final prediction = PredictionEngine.predict(entries);
-
-      expect(prediction.rankings.first.courseNo, 4);
-      expect(prediction.rankings.first.factors, contains('평균 ST'));
-      expect(prediction.rankings.first.factors, contains('모터'));
-      expect(prediction.rankings.first.factors, contains('보트'));
+      expect(PredictionEngine.predict(entries).rankings.first.courseNo, 6);
     });
 
-    test('일부 코스만 있는 사후 배당은 예측에 사용하지 않는다', () {
-      final entries = List.generate(6, (index) => _entry(index + 1));
-
-      final withoutOdds = PredictionEngine.predict(entries);
-      final incompleteOdds = PredictionEngine.predict(
-        entries,
-        odds: const Odds(win: {1: 1.1}),
+    test('모든 선수에게 없는 피처는 순위를 바꾸지 않는다', () {
+      final withoutEquipment = List.generate(
+        6,
+        (index) => _entry(index + 1, grade: 'A2', avgRankPoint: 6 - index * 0.4),
       );
+      // 같은 값이 모두에게 채워지면 softmax 특성상 순위에 영향이 없어야 한다.
+      final withUniformEquipment = withoutEquipment
+          .map((entry) => entry.copyWith(motorRankPoint: 5, boatRankPoint: 5))
+          .toList();
 
       expect(
-        incompleteOdds.rankings.map((racer) => racer.courseNo),
-        withoutOdds.rankings.map((racer) => racer.courseNo),
+        _order(PredictionEngine.predict(withUniformEquipment)),
+        _order(PredictionEngine.predict(withoutEquipment)),
       );
-      expect(
-        incompleteOdds.rankings.every(
-          (racer) => !racer.factors.containsKey('배당'),
-        ),
-        isTrue,
-      );
+    });
+
+    test('근거 칩에는 실제로 값이 있는 피처만 담는다', () {
+      final prediction = PredictionEngine.predict([
+        _entry(1, grade: 'A1', avgRankPoint: 6.5, motorRankPoint: 5.2),
+        _entry(2),
+      ]);
+
+      final factors = prediction.rankings.first.factors;
+      expect(factors.keys, containsAll(['코스', '등급', '평균착순점', '모터']));
+      expect(factors.containsKey('보트'), isFalse);
     });
 
     test('악천후에서는 순위를 바꾸지 않고 신뢰도만 낮춘다', () {
       final entries = List.generate(
         6,
-        (index) => _entry(
-          index + 1,
-          score: 8 - index * 0.5,
-          winRate: 25 - index.toDouble(),
-        ),
+        (index) => _entry(index + 1, avgRankPoint: 7 - index * 0.5),
       );
 
       final normal = PredictionEngine.predict(entries);
@@ -104,9 +111,20 @@ void main() {
         conditions: const RaceConditions(windSpeed: 8, precipitation: 2),
       );
 
-      expect(adverse.rankings.first.courseNo, normal.rankings.first.courseNo);
+      expect(_order(adverse), _order(normal));
       expect(adverse.confidence, lessThan(normal.confidence));
       expect(adverse.analysis, contains('신뢰도를 보수적으로 조정'));
+    });
+
+    test('신뢰도는 1순위 선수의 예상 승률과 같다', () {
+      final prediction = PredictionEngine.predict(
+        List.generate(6, (index) => _entry(index + 1)),
+      );
+
+      expect(
+        prediction.confidence,
+        closeTo(prediction.rankings.first.winProb, 0.001),
+      );
     });
 
     test('저장된 순위에서 베팅 추천을 동일하게 복원한다', () {
@@ -138,9 +156,9 @@ void main() {
 
     test('단승, 복승, 쌍승과 TOP3 적중을 계산한다', () {
       final prediction = PredictionEngine.predict([
-        _entry(1, grade: 'A1', score: 9, winRate: 40),
-        _entry(2, grade: 'A2', score: 8, winRate: 30),
-        _entry(3, grade: 'B1', score: 7, winRate: 20),
+        _entry(1, grade: 'A1', avgRankPoint: 7),
+        _entry(2, grade: 'A2', avgRankPoint: 6),
+        _entry(3, grade: 'B1', avgRankPoint: 5),
       ]);
       final ranked = prediction.rankings;
       final result = RaceResult(

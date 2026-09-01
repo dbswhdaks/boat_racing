@@ -23,13 +23,11 @@ Color _gradeColor(String grade) {
 Color _factorColor(String key) {
   return switch (key) {
     '등급' => Colors.red.shade300,
-    '평균득점' => Colors.blue.shade300,
-    '승률' || '최근 우승' => Colors.green.shade300,
+    '평균착순점' => Colors.blue.shade300,
+    '연대율' => Colors.green.shade300,
     '코스' => Colors.purple.shade300,
-    '평균 ST' => Colors.cyan.shade300,
-    '모터' || '보트' => Colors.orange.shade300,
-    '체중' => Colors.teal.shade300,
-    '배당' => Colors.amber.shade300,
+    '모터' || '모터 연대율' || '모터 삼연대율' => Colors.orange.shade300,
+    '보트' || '보트 연대율' => Colors.teal.shade300,
     _ => Colors.grey.shade500,
   };
 }

@@ -10,8 +10,27 @@ class RaceEntry {
   final int? motorNo;
   final double? weight;
   final double? avgStartTime;
+
+  /// 선수 연간 평균착순점 (0~10).
+  final double? avgRankPoint;
+
+  /// 선수 연간 연대율 (%). 2착 이내 비율.
+  final double? top2Rate;
+
+  /// 보트 연간 연대율 (%).
   final double? boatWinRate;
+
+  /// 보트 연간 평균착순점 (0~10).
+  final double? boatRankPoint;
+
+  /// 모터 연간 이연대율 (%).
   final double? motorWinRate;
+
+  /// 모터 연간 삼연대율 (%).
+  final double? motorTop3Rate;
+
+  /// 모터 연간 평균착순점 (0~10).
+  final double? motorRankPoint;
 
   const RaceEntry({
     required this.courseNo,
@@ -25,8 +44,13 @@ class RaceEntry {
     this.motorNo,
     this.weight,
     this.avgStartTime,
+    this.avgRankPoint,
+    this.top2Rate,
     this.boatWinRate,
+    this.boatRankPoint,
     this.motorWinRate,
+    this.motorTop3Rate,
+    this.motorRankPoint,
   });
 
   /// 이전 캐시/화면 코드와의 호환을 위한 별칭.
@@ -39,8 +63,13 @@ class RaceEntry {
     double? winRate,
     double? weight,
     double? avgStartTime,
+    double? avgRankPoint,
+    double? top2Rate,
     double? boatWinRate,
+    double? boatRankPoint,
     double? motorWinRate,
+    double? motorTop3Rate,
+    double? motorRankPoint,
   }) {
     return RaceEntry(
       courseNo: courseNo,
@@ -54,8 +83,13 @@ class RaceEntry {
       motorNo: motorNo,
       weight: weight ?? this.weight,
       avgStartTime: avgStartTime ?? this.avgStartTime,
+      avgRankPoint: avgRankPoint ?? this.avgRankPoint,
+      top2Rate: top2Rate ?? this.top2Rate,
       boatWinRate: boatWinRate ?? this.boatWinRate,
+      boatRankPoint: boatRankPoint ?? this.boatRankPoint,
       motorWinRate: motorWinRate ?? this.motorWinRate,
+      motorTop3Rate: motorTop3Rate ?? this.motorTop3Rate,
+      motorRankPoint: motorRankPoint ?? this.motorRankPoint,
     );
   }
 }
