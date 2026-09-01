@@ -6,6 +6,7 @@ import '../network/dio_client.dart';
 import '../../models/race.dart';
 import '../../models/race_entry.dart';
 import '../../models/race_result.dart';
+import '../../models/decision_odds.dart';
 import '../../models/odds.dart';
 
 class KboatVideoInfo {
@@ -34,6 +35,10 @@ class KboatScraperService {
   static const _cardUrl = 'https://www.kboat.or.kr/race/card/decision';
   static const _finalOddsUrl =
       'https://www.kboat.or.kr/race/dividendrate/final';
+  static const _decisionOddsUrl =
+      'https://www.kboat.or.kr/race/dividendrate/decision';
+  static const _resultGeneralUrl =
+      'https://www.kboat.or.kr/race/result/general';
   final Dio _dio = dioClient;
 
   final Map<String, List<KboatVideoInfo>> _cache = {};
@@ -43,6 +48,8 @@ class KboatScraperService {
   KboatRaceResultBundle? _resultCache;
   String? _resultCacheDate;
   final Map<String, ({Odds odds, DateTime fetchedAt})> _oddsCache = {};
+  final Map<String, DecisionOdds> _decisionOddsCache = {};
+  final Map<String, Map<int, String>> _raceRecordsCache = {};
 
   String _monthKey(int year, int month) =>
       '$year${month.toString().padLeft(2, '0')}';
@@ -325,6 +332,212 @@ class KboatScraperService {
     return '$_finalOddsUrl/$year/$weekTcnt/$dayTcnt/$raceNoPath';
   }
 
+  /// 확정배당률 조회. 경주가 끝난 뒤에만 값이 있고, 한 번 확정되면 바뀌지
+  /// 않으므로 성공한 결과는 계속 재사용한다.
+  Future<DecisionOdds> fetchDecisionOdds({
+    required String date,
+    required int raceNo,
+  }) async {
+    final cacheKey = '${date}_$raceNo';
+    final cached = _decisionOddsCache[cacheKey];
+    if (cached != null) return cached;
+
+    final weekDay = await getWeekDayForDate(date);
+    if (weekDay == null || date.length < 4) return const DecisionOdds();
+
+    try {
+      final response = await _dio.get(
+        decisionOddsRequestUrl(
+          year: date.substring(0, 4),
+          weekTcnt: weekDay.$1,
+          dayTcnt: weekDay.$2,
+          raceNo: raceNo,
+        ),
+        options: Options(
+          headers: {
+            'X-Requested-With': 'XMLHttpRequest',
+            'Accept': 'text/html',
+          },
+        ),
+      );
+      final odds = parseDecisionOddsHtml(response.data?.toString() ?? '');
+      if (!odds.isEmpty) _decisionOddsCache[cacheKey] = odds;
+      return odds;
+    } catch (e) {
+      if (kDebugMode) debugPrint('[KBOAT] 확정배당 조회 실패: $e');
+      return const DecisionOdds();
+    }
+  }
+
+  @visibleForTesting
+  String decisionOddsRequestUrl({
+    required String year,
+    required int weekTcnt,
+    required int dayTcnt,
+    required int raceNo,
+  }) {
+    final raceNoPath = raceNo.toString().padLeft(2, '0');
+    return '$_decisionOddsUrl/$year/$weekTcnt/$dayTcnt/$raceNoPath';
+  }
+
+  /// 확정배당률은 `승식 / 승자 / 배당률(%)` 세 줄짜리 표 하나로 온다.
+  /// 연승은 1착·2착 선수 몫이 각각 있어 같은 이름의 열이 두 번 나온다.
+  @visibleForTesting
+  DecisionOdds parseDecisionOddsHtml(String html) {
+    if (html.isEmpty) return const DecisionOdds();
+
+    for (final table in RegExp(
+      r'<table\b[^>]*>(.*?)</table>',
+      dotAll: true,
+    ).allMatches(html)) {
+      List<String>? labels;
+      List<String>? values;
+      for (final row in _tableRows(table.group(1) ?? '')) {
+        final cells = _allCells(row).map(_plainText).toList();
+        if (cells.isEmpty) continue;
+        if (cells.first == '승식') labels = cells;
+        if (cells.first.startsWith('배당률')) values = cells;
+      }
+      if (labels == null || values == null) continue;
+
+      double? win;
+      double? placeFirst;
+      double? placeSecond;
+      double? exacta;
+      double? quinella;
+      double? trio;
+      double? xla;
+      double? trifecta;
+      var placeColumns = 0;
+
+      for (var index = 1; index < labels.length; index++) {
+        final value = index < values.length
+            ? double.tryParse(values[index])
+            : null;
+        switch (labels[index]) {
+          case '단승':
+            win = value;
+          case '연승':
+            // 취소로 값이 비어도 열 순서는 유지되므로 등장 횟수로 구분한다.
+            if (placeColumns == 0) {
+              placeFirst = value;
+            } else {
+              placeSecond = value;
+            }
+            placeColumns++;
+          case '쌍승':
+            exacta = value;
+          case '복승':
+            quinella = value;
+          case '삼복승':
+            trio = value;
+          case '쌍복승':
+            xla = value;
+          case '삼쌍승':
+            trifecta = value;
+        }
+      }
+
+      return DecisionOdds(
+        win: win,
+        placeFirst: placeFirst,
+        placeSecond: placeSecond,
+        exacta: exacta,
+        quinella: quinella,
+        trio: trio,
+        xla: xla,
+        trifecta: trifecta,
+      );
+    }
+    return const DecisionOdds();
+  }
+
+  /// 착순별 항주시간(기록) 조회. 확정된 뒤에는 바뀌지 않으므로 재사용한다.
+  Future<Map<int, String>> fetchRaceRecords({
+    required String date,
+    required int raceNo,
+  }) async {
+    final cacheKey = '${date}_$raceNo';
+    final cached = _raceRecordsCache[cacheKey];
+    if (cached != null) return cached;
+
+    final weekDay = await getWeekDayForDate(date);
+    if (weekDay == null || date.length < 4) return const {};
+
+    try {
+      final response = await _dio.get(
+        raceRecordsRequestUrl(
+          year: date.substring(0, 4),
+          weekTcnt: weekDay.$1,
+          dayTcnt: weekDay.$2,
+          raceNo: raceNo,
+        ),
+        options: Options(
+          headers: {
+            'X-Requested-With': 'XMLHttpRequest',
+            'Accept': 'text/html',
+          },
+        ),
+      );
+      final records = parseRaceRecordsHtml(response.data?.toString() ?? '');
+      if (records.isNotEmpty) _raceRecordsCache[cacheKey] = records;
+      return records;
+    } catch (e) {
+      if (kDebugMode) debugPrint('[KBOAT] 경주기록 조회 실패: $e');
+      return const {};
+    }
+  }
+
+  @visibleForTesting
+  String raceRecordsRequestUrl({
+    required String year,
+    required int weekTcnt,
+    required int dayTcnt,
+    required int raceNo,
+  }) {
+    final raceNoPath = raceNo.toString().padLeft(2, '0');
+    return '$_resultGeneralUrl/$year/$weekTcnt/$dayTcnt/$raceNoPath';
+  }
+
+  /// 경주결과 페이지의 착순 표에서 `착순 → 항주시간` 을 뽑는다.
+  /// 착순은 `<th>`, 나머지 열은 `<td>` 라서 데이터 행의 열 위치는
+  /// 머리글보다 하나씩 앞선다.
+  @visibleForTesting
+  Map<int, String> parseRaceRecordsHtml(String html) {
+    if (html.isEmpty) return const {};
+
+    for (final table in RegExp(
+      r'<table\b[^>]*>(.*?)</table>',
+      dotAll: true,
+    ).allMatches(html)) {
+      final rows = _tableRows(table.group(1) ?? '').toList();
+      var timeColumn = -1;
+      final records = <int, String>{};
+
+      for (final row in rows) {
+        if (timeColumn < 0) {
+          final headers = _headerCells(row).map(_plainText).toList();
+          if (headers.isEmpty || headers.first != '착순') continue;
+          timeColumn = headers.indexOf('항주시간') - 1;
+          if (timeColumn < 0) break;
+          continue;
+        }
+
+        final headers = _headerCells(row);
+        if (headers.isEmpty) continue;
+        final rank = int.tryParse(_plainText(headers.first));
+        final cells = _dataCells(row);
+        if (rank == null || timeColumn >= cells.length) continue;
+
+        final time = _plainText(cells[timeColumn]);
+        if (time.isNotEmpty && time != '-') records[rank] = time;
+      }
+
+      if (records.isNotEmpty) return records;
+    }
+    return const {};
+  }
+
   @visibleForTesting
   Odds parseFinalOddsHtml(String html) {
     if (html.isEmpty) return const Odds();
@@ -353,18 +566,22 @@ class KboatScraperService {
     );
   }
 
+  /// 단승식·연승식은 코스 1~6 이 한 줄에 담긴다. 결장한 코스는 `-` 로 오므로
+  /// 그 코스만 빼고 나머지 배당은 살린다.
   Map<int, double> _parseCourseTable(String? section) {
     if (section == null) return const {};
     for (final row in _tableRows(section)) {
       final values = _dataCells(
         row,
       ).map((cell) => double.tryParse(_plainText(cell))).toList();
-      if (values.length < 6 || values.take(6).any((value) => value == null)) {
-        continue;
+      if (values.length < 6) continue;
+
+      final odds = <int, double>{};
+      for (var index = 0; index < 6; index++) {
+        final value = values[index];
+        if (value != null) odds[index + 1] = value;
       }
-      return {
-        for (var index = 0; index < 6; index++) index + 1: values[index]!,
-      };
+      if (odds.isNotEmpty) return odds;
     }
     return const {};
   }
@@ -412,28 +629,37 @@ class KboatScraperService {
     return result;
   }
 
+  /// 삼쌍승식은 1·2착 조합이 머리글 행에 오고, 이후 각 행에서 3착은 `<th>`,
+  /// 배당은 `<td>` 로 열마다 한 쌍씩 나온다.
   Map<String, double> _parseTrifectaTables(String? section) {
     if (section == null) return const {};
     final result = <String, double>{};
+    final pairPattern = RegExp(r'^[1-6]-[1-6]$');
     final tables = RegExp(
       r'<table\b[^>]*>(.*?)</table>',
       dotAll: true,
     ).allMatches(section);
-    for (final tableMatch in tables) {
-      final table = tableMatch.group(1) ?? '';
-      final firstTwo = RegExp(
-        r'>\s*([1-6]-[1-6])\s*<',
-      ).allMatches(table).map((match) => match.group(1)!).toList();
-      if (firstTwo.isEmpty) continue;
 
-      for (final row in _tableRows(table)) {
-        final cells = _dataCells(row).map(_plainText).toList();
-        if (cells.length < firstTwo.length * 2) continue;
-        for (var index = 0; index < firstTwo.length; index++) {
-          final third = int.tryParse(cells[index * 2]);
-          final value = double.tryParse(cells[index * 2 + 1]);
+    for (final tableMatch in tables) {
+      var pairs = const <String>[];
+
+      for (final row in _tableRows(tableMatch.group(1) ?? '')) {
+        final headers = _headerCells(row).map(_plainText).toList();
+        final values = _dataCells(row).map(_plainText).toList();
+
+        if (values.isEmpty) {
+          if (headers.isNotEmpty && headers.every(pairPattern.hasMatch)) {
+            pairs = headers;
+          }
+          continue;
+        }
+        if (pairs.isEmpty || headers.length != values.length) continue;
+
+        for (var index = 0; index < pairs.length; index++) {
+          final third = int.tryParse(headers[index]);
+          final value = double.tryParse(values[index]);
           if (third != null && value != null) {
-            result['${firstTwo[index]}-$third'] = value;
+            result['${pairs[index]}-$third'] = value;
           }
         }
       }
@@ -458,6 +684,13 @@ class KboatScraperService {
   List<String> _dataCells(String row) {
     return RegExp(
       r'<td\b[^>]*>(.*?)</td>',
+      dotAll: true,
+    ).allMatches(row).map((match) => match.group(1) ?? '').toList();
+  }
+
+  List<String> _headerCells(String row) {
+    return RegExp(
+      r'<th\b[^>]*>(.*?)</th>',
       dotAll: true,
     ).allMatches(row).map((match) => match.group(1) ?? '').toList();
   }

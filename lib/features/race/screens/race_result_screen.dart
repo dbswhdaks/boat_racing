@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../../core/constants/api_constants.dart';
 import '../../../core/services/prediction_engine.dart';
+import '../../../models/decision_odds.dart';
 import '../../../models/prediction.dart';
 import '../../../models/race.dart';
 import '../../../models/race_entry.dart';
@@ -145,6 +146,8 @@ class _RaceResultScreenState extends ConsumerState<RaceResultScreen> {
     ref.invalidate(raceRankProvider(p));
     ref.invalidate(raceEntriesProvider(p));
     ref.invalidate(oddsProvider(p));
+    ref.invalidate(decisionOddsProvider(p));
+    ref.invalidate(raceRecordsProvider(p));
     ref.invalidate(predictionEvaluationProvider(p));
   }
 
@@ -324,12 +327,20 @@ class _RaceResultScreenState extends ConsumerState<RaceResultScreen> {
                       _buildComparison(entriesAsync, predAsync, resultAsync),
                       const SizedBox(height: 24),
                       resultAsync.maybeWhen(
-                        data: (r) => _OddsSection(result: r),
+                        data: (r) => _OddsSection(
+                          result: r,
+                          date: widget.date,
+                          raceNo: widget.raceNo,
+                        ),
                         orElse: () => const SizedBox.shrink(),
                       ),
                       const SizedBox(height: 24),
                       rankAsync.when(
-                        data: (ranks) => _RankListSection(ranks: ranks),
+                        data: (ranks) => _RankListSection(
+                          ranks: ranks,
+                          date: widget.date,
+                          raceNo: widget.raceNo,
+                        ),
                         loading: () => preRace
                             ? const SizedBox.shrink()
                             : const Padding(
@@ -363,6 +374,8 @@ class _RaceResultScreenState extends ConsumerState<RaceResultScreen> {
                                     'racer_nm': r.third,
                                   },
                               ],
+                              date: widget.date,
+                              raceNo: widget.raceNo,
                             );
                           }
                           return const SizedBox.shrink();
@@ -1272,10 +1285,22 @@ class _MatchBadge extends StatelessWidget {
 
 // ─── Odds Section ──────────────────────────────────────────────────────────────
 
-class _OddsSection extends StatelessWidget {
-  const _OddsSection({required this.result});
+/// 배당이 없을 때 0 으로 오는 값을 `null` 로 바꿔 '-' 표시로 넘긴다.
+double? _orNull(double value) => value > 0 ? value : null;
+
+/// 적중 배당 — KBOAT 확정배당률을 우선 쓰고, 아직 없으면 경주 결과 응답에
+/// 들어온 단승·연승만 보완한다. 결과 응답의 나머지 승식 필드는 채워지지 않거나
+/// 승식이 뒤바뀌어 오므로 쓰지 않는다.
+class _OddsSection extends ConsumerWidget {
+  const _OddsSection({
+    required this.result,
+    required this.date,
+    required this.raceNo,
+  });
 
   final RaceResult result;
+  final String date;
+  final int raceNo;
 
   Widget _courseChip(int no) {
     return Container(
@@ -1346,10 +1371,15 @@ class _OddsSection extends StatelessWidget {
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final f = result.firstNo;
     final s = result.secondNo;
     final t = result.thirdNo;
+    final decision =
+        ref
+            .watch(decisionOddsProvider((date: date, raceNo: raceNo)))
+            .valueOrNull ??
+        const DecisionOdds();
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1381,37 +1411,42 @@ class _OddsSection extends StatelessWidget {
             children: [
               _OddRow(
                 label: '단승',
-                value: result.winOdds,
+                value: decision.win ?? _orNull(result.winOdds),
                 combination: f > 0 ? _comboOrdered([f]) : null,
               ),
               _OddRow(
                 label: '연승',
-                value: result.placeOdds,
-                combination: f > 0 ? _comboUnordered([f, s]) : null,
+                value: decision.placeFirst ?? _orNull(result.placeOdds),
+                combination: f > 0 ? _comboOrdered([f]) : null,
+              ),
+              _OddRow(
+                label: '연승',
+                value: decision.placeSecond,
+                combination: s > 0 ? _comboOrdered([s]) : null,
               ),
               _OddRow(
                 label: '쌍승',
-                value: result.exactaOdds,
+                value: decision.exacta,
                 combination: f > 0 ? _comboOrdered([f, s]) : null,
               ),
               _OddRow(
                 label: '복승',
-                value: result.quinellaOdds,
+                value: decision.quinella,
                 combination: f > 0 ? _comboUnordered([f, s]) : null,
               ),
               _OddRow(
                 label: '삼복승',
-                value: result.triellaOdds,
+                value: decision.trio,
                 combination: f > 0 ? _comboUnordered([f, s, t]) : null,
               ),
               _OddRow(
                 label: '쌍복승',
-                value: result.xlaOdds,
+                value: decision.xla,
                 combination: f > 0 ? _comboSemiOrdered(f, [s, t]) : null,
               ),
               _OddRow(
                 label: '삼쌍승',
-                value: result.trxOdds,
+                value: decision.trifecta,
                 combination: f > 0 ? _comboOrdered([f, s, t]) : null,
                 isLast: true,
               ),
@@ -1432,7 +1467,7 @@ class _OddRow extends StatelessWidget {
   });
 
   final String label;
-  final double value;
+  final double? value;
   final Widget? combination;
   final bool isLast;
 
@@ -1456,7 +1491,7 @@ class _OddRow extends StatelessWidget {
             const Spacer(),
           const SizedBox(width: 8),
           Text(
-            value > 0 ? value.toStringAsFixed(1) : '-',
+            value != null && value! > 0 ? value!.toStringAsFixed(1) : '-',
             style: const TextStyle(
               color: _accent,
               fontWeight: FontWeight.w700,
@@ -1471,19 +1506,29 @@ class _OddRow extends StatelessWidget {
 
 // ─── Rank List Section ─────────────────────────────────────────────────────────
 
-class _RankListSection extends StatelessWidget {
-  const _RankListSection({required this.ranks});
+class _RankListSection extends ConsumerWidget {
+  const _RankListSection({
+    required this.ranks,
+    required this.date,
+    required this.raceNo,
+  });
 
   final List<Map<String, dynamic>> ranks;
+  final String date;
+  final int raceNo;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final records =
+        ref
+            .watch(raceRecordsProvider((date: date, raceNo: raceNo)))
+            .valueOrNull ??
+        const <int, String>{};
+
     final sorted = List<Map<String, dynamic>>.from(ranks);
     sorted.sort((a, b) {
-      final ra = a['rank'];
-      final rb = b['rank'];
-      final ia = ra is int ? ra : int.tryParse('$ra') ?? 99;
-      final ib = rb is int ? rb : int.tryParse('$rb') ?? 99;
+      final ia = _rankValue(a) ?? 99;
+      final ib = _rankValue(b) ?? 99;
       return ia.compareTo(ib);
     });
 
@@ -1506,11 +1551,12 @@ class _RankListSection extends StatelessWidget {
         ),
         const SizedBox(height: 12),
         ...sorted.map((row) {
-          final rank = row['rank'] ?? '-';
+          final rank = _rankValue(row);
           final cn = _courseNo(row);
           final nm = _racerNm(row);
-          final rankInt = rank is int ? rank : int.tryParse('$rank') ?? 99;
-          final raceTime = row['race_time']?.toString() ?? '';
+          final rankInt = rank ?? 99;
+          final rowTime = row['race_time']?.toString() ?? '';
+          final raceTime = rowTime.isNotEmpty ? rowTime : records[rankInt] ?? '';
           final backNo = row['back_no']?.toString() ?? '';
           return Container(
             margin: const EdgeInsets.only(bottom: 6),
@@ -1531,7 +1577,7 @@ class _RankListSection extends StatelessWidget {
                   ),
                   alignment: Alignment.center,
                   child: Text(
-                    '$rank',
+                    rank?.toString() ?? '-',
                     style: TextStyle(
                       color: _rankFgColor(rankInt),
                       fontWeight: FontWeight.w700,

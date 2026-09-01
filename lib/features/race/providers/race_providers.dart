@@ -6,6 +6,7 @@ import '../../../core/services/kboat_scraper_service.dart';
 import '../../../core/services/prediction_engine.dart';
 import '../../../core/services/supabase_backup_service.dart';
 import '../../../features/subscription/providers/in_app_purchase_provider.dart';
+import '../../../models/decision_odds.dart';
 import '../../../models/race.dart';
 import '../../../models/race_entry.dart';
 import '../../../models/race_result.dart';
@@ -296,6 +297,29 @@ final oddsProvider = FutureProvider.family<Odds, ({String date, int raceNo})>((
   if (result.isSuccess && result.data != null) return result.data!;
   return const Odds();
 });
+
+/// 확정배당률 — 경주 종료 후 승식별 실지급 배당.
+final decisionOddsProvider =
+    FutureProvider.family<DecisionOdds, ({String date, int raceNo})>((
+      ref,
+      params,
+    ) async {
+      final kboat = ref.watch(kboatScraperProvider);
+      return kboat.fetchDecisionOdds(
+        date: params.date,
+        raceNo: params.raceNo,
+      );
+    });
+
+/// 착순별 기록(항주시간). 공공 API 순위 응답에는 기록 필드가 없어 KBOAT 에서 받는다.
+final raceRecordsProvider =
+    FutureProvider.family<Map<int, String>, ({String date, int raceNo})>((
+      ref,
+      params,
+    ) async {
+      final kboat = ref.watch(kboatScraperProvider);
+      return kboat.fetchRaceRecords(date: params.date, raceNo: params.raceNo);
+    });
 
 /// 날짜 → (회차, 일차) 변환. 공공 API 의 RACE_DOC 은 경주 당일 이후에 갱신되므로,
 /// 매핑이 아직 없으면 KBOAT 확정출주표 페이지의 연간 매핑으로 보완한다.
